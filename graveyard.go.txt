@@ -1,0 +1,100 @@
+type handler struct{}
+
+func (theHandler *handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	var from, to int
+
+	_, err := fmt.Sscanf(request.URL.Path, "/query/%d/%d", &from, &to)
+
+	if err != nil {
+		log.Printf("%v, %v", request.URL, err)
+		io.WriteString(writer, fmt.Sprintf("shit gone south!\n%v\n", err))
+		return
+	}
+
+	log.Printf("from: %d, to: %d\n", from, to)
+}
+
+const port = "8080"
+
+func main() {
+	// server := http.Server{
+	// 	Addr:    fmt.Sprintf(":%s", port),
+	// 	Handler: &handler{},
+	// }
+
+	c, err := getValuesBin()
+
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
+	for time := range c {
+		fmt.Println(time)
+	}
+
+	// server.ListenAndServe()
+}
+
+func getValues(from int, to int, column int) ([]int, error) {
+	file, err := os.Open("data.base")
+
+	if err != nil {
+		return nil, err
+	}
+
+	buffer := make([]byte, 4096)
+
+	for {
+		lenRead, err := file.Read(buffer)
+		if err != nil {
+			return nil, err
+		}
+		if lenRead != len(buffer) {
+			return nil, errors.New("file size not a multiple of 4k")
+		}
+
+		var header struct {
+			From    int64
+			To      int64
+			NumVals uint16
+			Dummy   uint16
+			NumVars uint16
+			LenCrx  uint16
+			Dummy2  int64
+		}
+
+		r := bytes.NewReader(buffer)
+
+		err = binary.Read(r, binary.LittleEndian, &header)
+		if err != nil {
+			return nil, err
+		}
+		log.Printf("from: %d to: %d compressed: %d vars: %d vals: %d", header.From, header.To, header.LenCrx, header.NumVars, header.NumVals)
+
+		lr, err := lzma.NewReader2(r)
+
+		if err != nil {
+			fmt.Print("shit1\n")
+			return nil, err
+		}
+
+		for {
+			var b byte
+			err = binary.Read(lr, binary.LittleEndian, &b)
+			if err != nil {
+				fmt.Print("shit3\n")
+				return nil, err
+			}
+			fmt.Printf("%d", b)
+		}
+
+		time := make([]uint8, header.NumVals)
+		err = binary.Read(lr, binary.LittleEndian, time)
+		if err != nil {
+			fmt.Print("shit2\n")
+			return nil, err
+
+			fmt.Printf("%v", time)
+		}
+	}
+}
