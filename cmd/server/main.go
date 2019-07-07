@@ -67,9 +67,7 @@ func query(writer http.ResponseWriter, from int64, to int64) error {
 	return nil
 }
 
-type handler struct{}
-
-func (theHandler *handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+func handleQuery(writer http.ResponseWriter, request *http.Request) {
 	var from, to int64
 
 	_, err := fmt.Sscanf(request.URL.Path, "/query/%d/%d", &from, &to)
@@ -98,10 +96,7 @@ func (theHandler *handler) ServeHTTP(writer http.ResponseWriter, request *http.R
 const port = 8080
 
 func main() {
-	server := http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: &handler{},
-	}
+	http.HandleFunc("/query/", handleQuery)
 
-	server.ListenAndServe()
+	http.ListenAndServe(":8080", nil)
 }

@@ -3,6 +3,7 @@ package encoder
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 
 	"github.com/jwilder/encoding/simple8b"
@@ -17,8 +18,8 @@ type BlockHeader struct {
 	NumColumns uint8
 	// number of points stored in block
 	NumPoints uint32
-	// bring header size to 3*64b
-	Dummy uint16
+	// number of used bytes in 4k block
+	BytesUsed uint16
 	// timestamp of the first data point
 	TimeFirst int64
 	// timestamp of the last data point
@@ -103,6 +104,7 @@ func EncodeBlock(values [][]int64) (bytes.Buffer, int, error) {
 	// go over possible numbers of values to store in block
 	// and keep track of number of words required for each column
 	for {
+		wordsTotalNext := wordsTotal
 		// check if column needs one more word to store valuesTotal
 		for i := range columns {
 			if columns[i].values < valuesTotal {
@@ -112,19 +114,20 @@ func EncodeBlock(values [][]int64) (bytes.Buffer, int, error) {
 					return buffer, 0, err
 				}
 
-				wordsTotal++
+				wordsTotalNext++
 				columns[i].wordsNext++
 				columns[i].values += count
 			}
 		}
 
 		// valuesTotal exceeds block capacity, do not update columns.words lower valuesTotal again
-		if wordsTotal > wordsMax {
+		if wordsTotalNext > wordsMax {
 			valuesTotal--
 			break
 		}
 
-		// valuesTotal fits inside block, update columns.words
+		// valuesTotal fits inside block, update columns.words and wordsTotal
+		wordsTotal = wordsTotalNext
 		for i := range columns {
 			columns[i].words = columns[i].wordsNext
 		}
@@ -136,12 +139,15 @@ func EncodeBlock(values [][]int64) (bytes.Buffer, int, error) {
 		valuesTotal++
 	}
 
+	bytesTotal := 8 * (wordsTotal + 3)
+
 	header := BlockHeader{
 		BlockVersion: 1,
 		NumPoints:    uint32(valuesTotal),
 		NumColumns:   uint8(len(values)),
 		TimeFirst:    values[0][0],
 		TimeLast:     values[0][valuesTotal-1],
+		BytesUsed:    uint16(bytesTotal),
 	}
 
 	buffer.Grow(4096)
@@ -158,8 +164,13 @@ func EncodeBlock(values [][]int64) (bytes.Buffer, int, error) {
 		}
 	}
 
+	// check if calculated length matches buffer length (should never fail)
+	if buffer.Len() != bytesTotal {
+		return buffer, 0, errors.New("buffer length does not match calculation")
+	}
+
 	// make sure buffer length is 4096 bytes
-	if err := binary.Write(&buffer, binary.LittleEndian, make([]uint8, 4096-buffer.Len())); err != nil {
+	if err := binary.Write(&buffer, binary.LittleEndian, make([]uint8, 4096-bytesTotal)); err != nil {
 		return buffer, 0, err
 	}
 
