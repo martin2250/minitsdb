@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -53,15 +54,25 @@ func query(writer http.ResponseWriter, from int64, to int64) error {
 			return err
 		}
 
-		for j := range values[0] {
-			if values[0][j] >= from && values[0][j] <= to {
-				// for i := range values {
-				// 	fmt.Fprintf(writer, "%d ", values[i][j])
-				// }
-				// fmt.Fprintln(writer)
-				fmt.Fprintf(writer, "%d\n", values[0][j])
+		buf := new(bytes.Buffer)
+
+		for i := range values {
+			if err := binary.Write(buf, binary.LittleEndian, values[i]); err != nil {
+				return err
 			}
 		}
+
+		buf.WriteTo(writer)
+
+		// for j := range values[0] {
+		// 	if values[0][j] >= from && values[0][j] <= to {
+		// 		for i := range values {
+		// 			io.WriteString(writer, strconv.FormatInt(values[i][j], 10))
+		// 			writer.Write([]byte{' '})
+		// 		}
+		// 		writer.Write([]byte{'\n'})
+		// 	}
+		// }
 	}
 
 	return nil

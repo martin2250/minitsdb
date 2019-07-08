@@ -7,6 +7,15 @@ import (
 	"path"
 )
 
+// Bucket is a downsampling step
+type Bucket struct {
+	TimeLast int64 // timestamp of last value stored in file (indicates when to downsample data)
+}
+
+func (b Bucket) Query() {
+
+}
+
 // Series describes a time series, id'd by a name and tags
 type Series struct {
 	Values        [][]int64
@@ -59,6 +68,12 @@ func readOptions(seriespath string) (Options, error) {
 // OpenSeries opens series from file
 func OpenSeries(seriespath string) (Series, error) {
 	series := Series{}
+	var err error
+	series.Options, err = readOptions(seriespath)
 
-	series.Options, err := readOptions(seriespath)
+	if err != nil {
+		return series, err
+	}
+
+	return series, nil
 }
