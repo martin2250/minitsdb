@@ -1,5 +1,8 @@
 package main
 
+// todo:
+//  - add check flag -> check timestamp order
+
 import (
 	"flag"
 	"fmt"
