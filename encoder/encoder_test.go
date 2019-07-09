@@ -14,7 +14,7 @@ func runEncodeTest(values [][]int64) (int, error) {
 		return 0, err
 	}
 
-	header, decoded, err := DecodeBlock(&buffer)
+	header, decoded, err := DecodeBlock(&buffer, nil)
 
 	if err != nil {
 		return 0, err

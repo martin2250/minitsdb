@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"time"
 )
 
 // Bucket is a downsampling step
@@ -39,10 +40,9 @@ type Options struct {
 	Path              string
 	Tags              map[string]string
 	DownsamplingSteps []DownsampleStep
-	FlushInterval     int // force write to disk after x seconds
-	Capacity          int // will write to disk when half full
-	TimeResolution    int // time resolution in seconds
-	ReuseBytes        int // reuse last block in file if less bytes are full
+	FlushInterval     time.Duration // force write to disk after x seconds
+	Capacity          int           // will write to disk when half full
+	ReuseBytes        int           // reuse last block in file if less bytes are full
 	Columns           map[string]Column
 }
 

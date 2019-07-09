@@ -45,9 +45,7 @@ func query(writer http.ResponseWriter, from int64, to int64) error {
 			break
 		}
 
-		r.Reset(buffer)
-
-		header, values, err := encoder.DecodeBlock(r)
+		header, values, err := encoder.DecodeBlock(r, &header)
 		// _, _, err = encoder.DecodeBlock(r)
 
 		if err != nil {

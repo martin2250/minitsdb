@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/jwilder/encoding/simple8b"
@@ -36,10 +37,21 @@ func DecodeHeader(r io.Reader) (BlockHeader, error) {
 }
 
 // DecodeBlock decodes values from a 4k block
-func DecodeBlock(r io.Reader) (BlockHeader, [][]int64, error) {
-	header, err := DecodeHeader(r)
-	if err != nil {
-		return header, nil, err
+// hdr can be nil, will read header from stream
+func DecodeBlock(r io.Reader, hdr *BlockHeader) (BlockHeader, [][]int64, error) {
+	var header BlockHeader
+
+	if hdr == nil {
+		var err error
+		header, err = DecodeHeader(r)
+		if err != nil {
+			return header, nil, err
+		}
+		if header.BytesUsed > 4096 {
+			return header, nil, fmt.Errorf("Header claims %d bytes used", header.BytesUsed)
+		}
+	} else {
+		header = *hdr
 	}
 
 	values := make([][]int64, header.NumColumns)
@@ -70,6 +82,28 @@ func DecodeBlock(r io.Reader) (BlockHeader, [][]int64, error) {
 	}
 
 	return header, values, nil
+}
+
+// ReadBlock reads exactly 4096 bytes from a io.Reader and decodes the block contained
+func ReadBlock(r io.Reader) (BlockHeader, [][]int64, error) {
+	lr := io.LimitReader(r, 4096)
+	var b bytes.Buffer
+
+	n, err := b.ReadFrom(lr)
+
+	if err != nil {
+		return BlockHeader{}, nil, err
+	}
+
+	if n == 0 {
+		return BlockHeader{}, nil, io.EOF
+	}
+
+	if n != 4096 {
+		return BlockHeader{}, nil, io.ErrUnexpectedEOF
+	}
+
+	return DecodeBlock(&b, nil)
 }
 
 // EncodeBlock encodes as many values into a 4k block as it can possibly fit
