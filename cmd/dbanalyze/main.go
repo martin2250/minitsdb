@@ -58,13 +58,16 @@ func main() {
 	result, err := analyzedb.Analyze(fileInput)
 	check(err)
 
-	fmt.Printf("number of blocks: %d\n", result.NumBlocks)
-	fmt.Printf("number of points: %d\n", result.NumPoints)
+	fmt.Printf(" number of blocks: %d\n", result.NumBlocks)
+	fmt.Printf(" number of points: %d\n", result.NumPoints)
+	fmt.Printf("number of columns: %d\n", result.NumColumns)
+	fmt.Printf("   bits per value: %0.2f\n",
+		float64(8*result.BytesTotal)/float64(result.NumPoints)/float64(result.NumColumns))
 	fmt.Printf("points / block:\n")
-	fmt.Printf("             avg: %0.2f\n", result.PointsMean)
-	fmt.Printf("           stdev: %0.2f\n", result.PointsStdev)
-	fmt.Printf("             min: %d\n", result.PointsMin)
-	fmt.Printf("             max: %d\n", result.PointsMax)
+	fmt.Printf("              avg: %0.2f\n", result.PointsMean)
+	fmt.Printf("            stdev: %0.2f\n", result.PointsStdev)
+	fmt.Printf("              min: %d\n", result.PointsMin)
+	fmt.Printf("              max: %d\n", result.PointsMax)
 	fmt.Printf("%s of %s used (%0.2f%%)\n",
 		formatFileSize(result.BytesUsed),
 		formatFileSize(result.BytesTotal),
