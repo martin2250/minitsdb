@@ -3,10 +3,13 @@ package series
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path"
 	"time"
+
+	"github.com/martin2250/minitsdb/encoder"
 )
 
 // Bucket is a downsampling step
@@ -31,6 +34,9 @@ type Query struct {
 // ErrQueryEnd indicated no more values to read
 var ErrQueryEnd = fmt.Errorf("Query has no more values")
 
+// ErrQueryError indicated read error
+var ErrQueryError = fmt.Errorf("Read error")
+
 // ReadNextBlock reads one 4k block and returns the values as values[point][column]
 // when there are no more points to read, ErrQueryEnd returned. values might still contain valid data
 // subsequent reads will also return ErrQueryEnd
@@ -50,17 +56,67 @@ func (bucket Bucket) CreateQuery(from, to int64, columns []int) (q Query, err er
 
 	files, err := ioutil.ReadDir(bucket.Path)
 
+	if err != nil {
+		return
+	}
+
+	// assume files are sorted in ascending order (need to pad filename with zeros)
 	for _, file := range files {
 		if file.IsDir() {
 			continue
 		}
 
 		var fileStartTime int64
-		if n, err := fmt.Sscanf(file.Name(), "%d.mdb", &fileStartTime); err == nil && n == 1 {
-			q.currentFile, err = os.Open(file.Name())
-
-			return q, nil
+		if n, err := fmt.Sscanf(file.Name(), "%d.mdb", &fileStartTime); err != nil || n == 1 {
+			continue
 		}
+
+		if fileStartTime < q.TimeFrom {
+			continue
+		}
+
+		if fileStartTime > (q.TimeTo + bucket.TimeStep) {
+			return q, ErrQueryEnd
+		}
+
+		q.currentFile, err = os.Open(file.Name())
+
+		if err != nil {
+			continue
+		}
+
+		var index int64
+
+		for {
+			_, err := q.currentFile.Seek(index, io.SeekStart)
+
+			if err != nil {
+				q.currentFile.Close()
+				return q, err
+			}
+
+			header, err := encoder.DecodeHeader(q.currentFile)
+
+			if err != nil {
+				// todo: report bad block
+				continue
+			}
+
+			if int64(header.TimeFirst) < q.TimeFrom {
+				_, err = q.currentFile.Seek(index, io.SeekStart)
+
+				if err != nil {
+					q.currentFile.Close()
+					return q, err
+				}
+
+				break
+			}
+
+			index += 4096
+		}
+
+		return q, nil
 	}
 
 	err = ErrQueryEnd
