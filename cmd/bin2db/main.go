@@ -86,6 +86,10 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if err := os.MkdirAll(opts.pathOutput, 0755); err != nil {
+		log.Fatalln(err)
+	}
+
 	values := make([][]int64, 13)
 	valuesNew, err := bd.ReadPoint()
 
