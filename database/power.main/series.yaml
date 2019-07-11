@@ -2,7 +2,7 @@ tags:
   name: power # folder name does not matter, name is derived from tags
   loc: main
 
-flushdelay: 300 # automatically flush when the oldest data stored only in RAM is 5 minutes old
+flushdelay: 5m # automatically flush when the oldest data stored only in RAM is 5 minutes old
 buffer: 500     # buffer 500 points before trying to write a block
 reusemax: 3800  # reuse (append new data to) last block in file if fewer bytes are used in that block
 
