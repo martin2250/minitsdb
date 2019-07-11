@@ -1,6 +1,10 @@
 package util
 
-import "os"
+import (
+	"os"
+
+	"golang.org/x/sys/unix"
+)
 
 // FileExists checks if file exists
 func FileExists(path string) bool {
@@ -15,4 +19,14 @@ func RoundDown(value, modulo int64) int64 {
 		return 0
 	}
 	return (value / modulo) * modulo
+}
+
+// InsertFileBlock uses fallocate syscall to insert one or multiple empty blocks
+// in the middle of a file, pushing back the contents that follow
+func InsertFileBlock(file *os.File, offset, length int64) error {
+	if length == 0 {
+		return nil
+	}
+
+	return unix.Fallocate(int(file.Fd()), unix.FALLOC_FL_INSERT_RANGE, offset, length)
 }
