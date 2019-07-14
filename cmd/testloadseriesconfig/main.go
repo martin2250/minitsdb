@@ -8,10 +8,11 @@ import (
 
 func main() {
 
-	c, err := series.LoadSeriesYamlConfig("../../database/power.main")
+	s, err := series.OpenSeries("../../database/power.main")
+
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	log.Printf("%+v\n", c)
+	log.Printf("%+v\n", s)
 }
