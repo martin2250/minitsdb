@@ -8,17 +8,18 @@ import (
 )
 
 // Bucket is a downsampling step
-// Bucket only describes data stored permanently in files, not
+// Bucket only describes data stored permanently in files, not the data buffered in RAM
 type Bucket struct {
-	Series Series
-	// TimeLast      int64 // timestamp of last value stored in file (indicates when to downsample data)
+	series        *Series
+	TimeLast      int64 // timestamp of last value stored in file (indicates when to downsample data)
 	TimeStep      int64 // time between points
 	PointsPerFile int64
+	First         bool
 }
 
 // GetPath returns the path where database files are stored
 func (b Bucket) GetPath() string {
-	return path.Join(b.Series.Path, strconv.FormatInt(b.TimeStep, 10))
+	return path.Join(b.series.Path, strconv.FormatInt(b.TimeStep, 10))
 }
 
 // GetFileName returns the name of the database file that starts at time

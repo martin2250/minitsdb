@@ -6,7 +6,8 @@ flushdelay: 5m # automatically flush when the oldest data stored only in RAM is 
 buffer: 500     # buffer 500 points before trying to write a block
 reusemax: 3800  # reuse (append new data to) last block in file if fewer bytes are used in that block
 
-buckets:        # folder '1' created by default
+buckets:        # first bucket sets time resolution -> here 1s
+  - factor: 1   # creates folder '1'
   - factor: 60  # creates folder '60'
   - factor: 60  # creates folder '3600'
 

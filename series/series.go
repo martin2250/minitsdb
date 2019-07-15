@@ -10,6 +10,7 @@ type Series struct {
 	OverwriteLast bool // data buffer contains last block on disk, overwrite
 	Path          string
 	Columns       []Column
+	Buckets       []Bucket
 
 	Tags       map[string]string
 	FlushDelay time.Duration
@@ -36,9 +37,21 @@ func OpenSeries(seriespath string) (Series, error) {
 		BufferSize: conf.Buffer,
 		ReuseMax:   conf.ReuseMax,
 		Columns:    make([]Column, 0),
+		Buckets:    make([]Bucket, len(conf.Buckets)),
 		Tags:       conf.Tags,
 
 		Path: seriespath,
+	}
+
+	timeStep := int64(1)
+
+	for i, bc := range conf.Buckets {
+		timeStep *= int64(bc.Factor)
+
+		s.Buckets[i].series = &s
+		s.Buckets[i].TimeStep = timeStep
+
+		s.Buckets[i].First = (i == 0)
 	}
 
 	for _, colconf := range conf.Columns {
