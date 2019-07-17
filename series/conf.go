@@ -79,8 +79,8 @@ func (c *YamlSeriesConfig) Check() error {
 		return errors.New("series tag set must contain 'name'")
 	}
 
-	for i, b := range c.Buckets {
-		if (i > 0 && b.Factor < 2) || b.Factor < 1 {
+	for _, b := range c.Buckets {
+		if b.Factor < 2 {
 			return errors.New("bucket downsampling factor must be greater than one")
 		}
 	}
@@ -93,6 +93,10 @@ func (c *YamlSeriesConfig) Check() error {
 
 		if _, ok := col.Tags["name"]; !ok {
 			return errors.New("column tag set must contain 'name'")
+		}
+
+		if _, ok := col.Tags["aggregation"]; ok {
+			return errors.New("column tag set may not contain 'aggregation'")
 		}
 	}
 
