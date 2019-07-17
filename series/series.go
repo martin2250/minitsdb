@@ -49,7 +49,7 @@ func OpenSeries(seriespath string) (Series, error) {
 		timeStep *= int64(bc.Factor)
 
 		s.Buckets[i].series = &s
-		s.Buckets[i].TimeStep = timeStep
+		s.Buckets[i].TimeResolution = timeStep
 
 		s.Buckets[i].First = (i == 0)
 	}

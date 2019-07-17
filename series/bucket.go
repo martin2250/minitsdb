@@ -10,16 +10,17 @@ import (
 // Bucket is a downsampling step
 // Bucket only describes data stored permanently in files, not the data buffered in RAM
 type Bucket struct {
-	series        *Series
-	TimeLast      int64 // timestamp of last value stored in file (indicates when to downsample data)
-	TimeStep      int64 // time between points
-	PointsPerFile int64
-	First         bool
+	series         *Series
+	TimeLast       int64 // timestamp of last value stored in file (indicates when to downsample data)
+	TimeResolution int64 // time between points
+	PointsPerFile  int64
+
+	First bool // indicates if this is the first (highest resolution) bucket (contains no aggregations)
 }
 
 // GetPath returns the path where database files are stored
 func (b Bucket) GetPath() string {
-	return path.Join(b.series.Path, strconv.FormatInt(b.TimeStep, 10))
+	return path.Join(b.series.Path, strconv.FormatInt(b.TimeResolution, 10))
 }
 
 // GetFileName returns the name of the database file that starts at time
@@ -51,4 +52,8 @@ func (b Bucket) GetDataFiles() ([]int64, error) {
 	}
 
 	return list, nil
+}
+
+func (b Bucket) GetIndex(tags map[string]string) {
+
 }
