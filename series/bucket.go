@@ -53,7 +53,3 @@ func (b Bucket) GetDataFiles() ([]int64, error) {
 
 	return list, nil
 }
-
-func (b Bucket) GetIndex(tags map[string]string) {
-
-}

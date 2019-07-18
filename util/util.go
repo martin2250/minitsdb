@@ -30,3 +30,14 @@ func InsertFileBlock(file *os.File, offset, length int64) error {
 
 	return unix.Fallocate(int(file.Fd()), unix.FALLOC_FL_INSERT_RANGE, offset, length)
 }
+
+// IsSubset checks if map a is a subset of map b
+func IsSubset(a map[string]string, b map[string]string) bool {
+	for ka, va := range a {
+		vb, ok := b[ka]
+		if !ok || va != vb {
+			return false
+		}
+	}
+	return true
+}

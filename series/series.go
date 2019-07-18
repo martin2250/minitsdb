@@ -1,7 +1,13 @@
 package series
 
 import (
+	"errors"
+	"fmt"
+	"math"
+	"regexp"
 	"time"
+
+	"github.com/martin2250/minitsdb/util"
 )
 
 // Series describes a time series, id'd by a name and tags
@@ -24,14 +30,122 @@ type Column struct {
 	Decimals int
 }
 
+// ErrColumnMismatch indicates that the insert failed because point values could not be assigned to series columns unambiguously
+var ErrColumnMismatch = errors.New("point values could not be assigned to series columns unambiguously")
+
+// ErrColumnAmbiguous indicates that the insert failed because point value tags match two columns
+var ErrColumnAmbiguous = errors.New("point values matches two columns")
+
+// ErrInsertAtEnd indicates that the insert failed because the point's time is already archived in a file
+var ErrInsertAtEnd = errors.New("time already archived")
+
+// ErrUnknownColumn indicates that the insert failed because one of the values could not be assigned to a column
+var ErrUnknownColumn = errors.New("value doesn't match any columns")
+
+// Point holds information about a point to be inserted into the series
+type Point struct {
+	Time   int64
+	Values []struct {
+		Tags  map[string]string
+		Value float64
+	}
+}
+
+// InsertPoint tries to insert a point into the Series, returns nil if successful
+func (s Series) InsertPoint(p Point) error {
+	// check if number of values matches columns
+	if len(p.Values) != len(s.Columns) {
+		return ErrColumnMismatch
+	}
+
+	// check if points time is already archived
+	if p.Time >= s.Buckets[0].TimeLast {
+		return ErrInsertAtEnd
+	}
+
+	// assign point values to columns
+	indices := make([]int, len(s.Columns))
+	// set all to -1 to indicate that no matching value was found in point (yet)
+	for i := range indices {
+		indices[i] = -1
+	}
+	// go through all values in point
+	for indexValue, value := range p.Values {
+		indicesCol := s.GetIndices(value.Tags)
+
+		if len(indicesCol) == 0 {
+			return ErrUnknownColumn
+		} else if len(indicesCol) != 1 {
+			return ErrColumnAmbiguous
+		}
+
+		indexColumn := indicesCol[0]
+
+		// check two points match this column
+		if indices[indexColumn] != -1 {
+			return ErrColumnMismatch
+		}
+
+		indices[indexColumn] = indexValue
+	}
+
+	// check if any column didn't receive a value (this shouldn't happen based on previous checks)
+	for _, i := range indices {
+		if i == -1 {
+			return ErrColumnMismatch
+		}
+	}
+
+	for indexColumn, indexPoint := range indices {
+		valf := p.Values[indexPoint].Value
+		valf *= math.Pow10(s.Columns[indexColumn].Decimals)
+		vali := int64(math.Round(valf))
+		s.Values[indexColumn] = append(s.Values[indexColumn], vali)
+	}
+
+	return nil
+}
+
+// GetIndices returns the indices of all columns that match the given set of tags
+// the values of argument 'tags' are used as regex to match against all columns
+func (s Series) GetIndices(tags map[string]string) []int {
+	indices := make([]int, 0)
+
+	for i, column := range s.Columns {
+		matches := true
+
+		for queryKey, queryValue := range tags {
+			columnValue, ok := column.Tags[queryKey]
+			if !ok {
+				matches = false
+				break
+			}
+
+			ok, _ = regexp.MatchString(queryValue, columnValue)
+			if !ok {
+				matches = false
+				break
+			}
+		}
+
+		if matches {
+			indices = append(indices, i)
+		}
+	}
+
+	return indices
+}
+
 // OpenSeries opens series from file
 func OpenSeries(seriespath string) (Series, error) {
+	// load config file
 	conf, err := LoadSeriesYamlConfig(seriespath)
 
 	if err != nil {
 		return Series{}, err
 	}
 
+	// create series struct
 	s := Series{
 		FlushDelay: conf.FlushDelay,
 		BufferSize: conf.Buffer,
@@ -43,6 +157,7 @@ func OpenSeries(seriespath string) (Series, error) {
 		Path: seriespath,
 	}
 
+	// create buckets
 	timeStep := int64(1)
 
 	for i, bc := range conf.Buckets {
@@ -54,6 +169,7 @@ func OpenSeries(seriespath string) (Series, error) {
 		s.Buckets[i].First = (i == 0)
 	}
 
+	// create columns
 	for _, colconf := range conf.Columns {
 		if colconf.Duplicate == nil {
 			s.Columns = append(s.Columns, Column{
@@ -79,6 +195,16 @@ func OpenSeries(seriespath string) (Series, error) {
 		}
 	}
 
+	// check columns for duplicates
+	for _, a := range s.Columns {
+		for _, b := range s.Columns {
+			if util.IsSubset(a.Tags, b.Tags) {
+				return Series{}, fmt.Errorf("Columns %v and %v are indistinguishable", a.Tags, b.Tags)
+			}
+		}
+	}
+
+	// create value buffers
 	s.Values = make([][]int64, 1+len(s.Columns))
 
 	for i := range s.Values {
