@@ -5,7 +5,7 @@ import (
 	"io/ioutil"
 	"path"
 
-	"github.com/martin2250/minitsdb/series"
+	"github.com/martin2250/minitsdb/database/series"
 )
 
 // NewDatabase creates a new database instance

@@ -3,13 +3,25 @@ package series
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"os"
 	"regexp"
 	"time"
+
+	"github.com/golang/glog"
+
+	"github.com/martin2250/minitsdb/encoder"
 
 	"github.com/martin2250/minitsdb/ingest"
 	"github.com/martin2250/minitsdb/util"
 )
+
+// Column holds the json structure that describes a column in a series
+type Column struct {
+	Tags     map[string]string
+	Decimals int
+}
 
 // Series describes a time series, id'd by a name and tags
 type Series struct {
@@ -23,12 +35,6 @@ type Series struct {
 	FlushDelay time.Duration
 	BufferSize int
 	ReuseMax   int
-}
-
-// Column holds the json structure that describes a column in a series
-type Column struct {
-	Tags     map[string]string
-	Decimals int
 }
 
 // ErrColumnMismatch indicates that the insert failed because point values could not be assigned to series columns unambiguously
@@ -159,6 +165,10 @@ func OpenSeries(seriespath string) (Series, error) {
 		s.Buckets[i].TimeResolution = timeStep
 
 		s.Buckets[i].First = (i == 0)
+
+		if err := s.Buckets[i].checkTimeLast(); err != nil {
+			return Series{}, err
+		}
 	}
 
 	// create columns
@@ -199,12 +209,94 @@ func OpenSeries(seriespath string) (Series, error) {
 		}
 	}
 
-	// create value buffers
-	s.Values = make([][]int64, 1+len(s.Columns))
+	err = s.checkFirstBucket()
 
-	for i := range s.Values {
-		s.Values[i] = make([]int64, 0)
+	if err != nil {
+		return Series{}, err
+	}
+
+	if s.Values == nil {
+		// create value buffers, 1 extra column for time
+		s.Values = make([][]int64, 1+len(s.Columns))
+
+		for i := range s.Values {
+			s.Values[i] = make([]int64, 0)
+		}
 	}
 
 	return s, nil
+}
+
+// checkFirstBucket checks the last block in the first bucket for free space according to ReuseMax
+// errors are to be treated as fatal
+func (s *Series) checkFirstBucket() error {
+	b := &s.Buckets[0]
+
+	times, err := b.GetDataFiles()
+
+	if err != nil {
+		return err
+	}
+
+	// no file to read
+	if len(times) < 1 {
+		glog.Info("no files in bucket")
+		return nil
+	}
+
+	lastPath := b.GetFileName(times[len(times)-1])
+
+	// check file size
+	stat, err := os.Stat(lastPath)
+
+	if err != nil {
+		return err
+	}
+
+	size := stat.Size()
+
+	if size%4096 != 0 {
+		return errors.New("file damaged")
+	}
+
+	blocks := size / 4096
+
+	// no blocks to read
+	if blocks < 1 {
+		return nil
+	}
+
+	// open file
+	file, err := os.Open(lastPath)
+
+	if err != nil {
+		return err
+	}
+
+	defer file.Close()
+
+	// seek last block
+	if _, err = file.Seek((blocks-1)*4096, io.SeekStart); err != nil {
+		return err
+	}
+
+	// read last block
+	header, values, err := encoder.ReadBlock(file)
+
+	if err != nil {
+		return err
+	}
+
+	// check if database file matches series
+	if int(header.NumColumns) != len(s.Columns) {
+		return errors.New("database file does not match series")
+	}
+
+	// reuse last block
+	if int(header.BytesUsed) < s.ReuseMax {
+		s.OverwriteLast = true
+		s.Values = values
+	}
+
+	return nil
 }

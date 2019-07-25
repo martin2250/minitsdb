@@ -4,8 +4,8 @@ import (
 	"errors"
 	"regexp"
 
+	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/ingest"
-	"github.com/martin2250/minitsdb/series"
 )
 
 // Database holds series from a database directory

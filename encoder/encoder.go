@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/jwilder/encoding/simple8b"
+	"github.com/martin2250/minitsdb/util"
 )
 
 // BlockHeader specifies the binary structure of
@@ -86,21 +87,10 @@ func DecodeBlock(r io.Reader, hdr *BlockHeader) (BlockHeader, [][]int64, error) 
 
 // ReadBlock reads exactly 4096 bytes from a io.Reader and decodes the block contained
 func ReadBlock(r io.Reader) (BlockHeader, [][]int64, error) {
-	lr := io.LimitReader(r, 4096)
-	var b bytes.Buffer
-
-	n, err := b.ReadFrom(lr)
+	b, err := util.ReadBlock(r)
 
 	if err != nil {
 		return BlockHeader{}, nil, err
-	}
-
-	if n == 0 {
-		return BlockHeader{}, nil, io.EOF
-	}
-
-	if n != 4096 {
-		return BlockHeader{}, nil, io.ErrUnexpectedEOF
 	}
 
 	return DecodeBlock(&b, nil)

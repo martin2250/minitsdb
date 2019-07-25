@@ -1,6 +1,8 @@
 package util
 
 import (
+	"bytes"
+	"io"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -40,4 +42,26 @@ func IsSubset(a map[string]string, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// ReadBlock reads a 4k block from a reader and returns it as bytes.Buffer
+func ReadBlock(r io.Reader) (bytes.Buffer, error) {
+	lr := io.LimitReader(r, 4096)
+	var b bytes.Buffer
+
+	n, err := b.ReadFrom(lr)
+
+	if err != nil {
+		return bytes.Buffer{}, err
+	}
+
+	if n == 0 {
+		return bytes.Buffer{}, io.EOF
+	}
+
+	if n != 4096 {
+		return bytes.Buffer{}, io.ErrUnexpectedEOF
+	}
+
+	return b, nil
 }

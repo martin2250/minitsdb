@@ -79,6 +79,10 @@ func (c *YamlSeriesConfig) Check() error {
 		return errors.New("series tag set must contain 'name'")
 	}
 
+	if len(c.Buckets) == 0 {
+		return errors.New("no buckets declared")
+	}
+
 	for i, b := range c.Buckets {
 		if (i != 0 && b.Factor < 2) || b.Factor < 1 {
 			return errors.New("bucket downsampling factor must be greater than one")
