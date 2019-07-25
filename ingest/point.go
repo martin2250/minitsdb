@@ -25,6 +25,6 @@ type PointSink interface {
 type PointSource interface {
 	// GetPoint returns a point to be inserted into the database
 	// the point is deleted from the source
-	// returns io.EOF if no point is available
-	GetPoint() (Point, error)
+	// returns false if no point is available
+	GetPoint() (Point, bool)
 }

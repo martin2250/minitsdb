@@ -1,7 +1,6 @@
 package pointsource
 
 import (
-	"io"
 	"math/rand"
 	"time"
 
@@ -15,9 +14,9 @@ type RandomPointSource struct {
 }
 
 // GetPoint returns a random point as described by the options
-func (rs RandomPointSource) GetPoint() (ingest.Point, error) {
+func (rs RandomPointSource) GetPoint() (ingest.Point, bool) {
 	if rand.Int31n(5) == 0 {
-		return ingest.Point{}, io.EOF
+		return ingest.Point{}, false
 	}
 
 	p := ingest.Point{
@@ -31,5 +30,5 @@ func (rs RandomPointSource) GetPoint() (ingest.Point, error) {
 		p.Values[i].Value = 500 * (rand.Float64() - 0.5)
 	}
 
-	return p, nil
+	return p, true
 }

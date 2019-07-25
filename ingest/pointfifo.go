@@ -1,8 +1,6 @@
 package ingest
 
 import (
-	"io"
-
 	fifo "github.com/foize/go.fifo"
 )
 
@@ -19,20 +17,20 @@ func NewPointFifo() PointFifo {
 }
 
 // GetPoint pops a point from the fifo. thread safe
-func (pf PointFifo) GetPoint() (Point, error) {
+func (pf PointFifo) GetPoint() (Point, bool) {
 	pointi := pf.fifo.Next()
 
 	if pointi == nil {
-		return Point{}, io.EOF
+		return Point{}, false
 	}
 
 	point, ok := pointi.(Point)
 
 	if !ok {
-		return Point{}, io.EOF
+		return Point{}, false
 	}
 
-	return point, nil
+	return point, true
 }
 
 // AddPoint pushes a point onto the fifo

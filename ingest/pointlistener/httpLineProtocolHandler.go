@@ -7,12 +7,11 @@ import (
 	"strings"
 
 	"github.com/martin2250/minitsdb/ingest"
-	"github.com/martin2250/minitsdb/ingest/pointsource"
 )
 
 // HTTPLineProtocolHandlergo handles http POST requests and stores incoming points to a point sink
 type HTTPLineProtocolHandlergo struct {
-	Sink pointsource.PointSink
+	Sink ingest.PointSink
 }
 
 // ServeHTTP processes a POST request with line protocol data

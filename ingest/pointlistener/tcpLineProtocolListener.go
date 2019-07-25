@@ -7,12 +7,11 @@ import (
 	"net"
 
 	"github.com/martin2250/minitsdb/ingest"
-	"github.com/martin2250/minitsdb/ingest/pointsource"
 )
 
 // TCPLineProtocolListener listens for TCP connections, receives points in line protocol format and stores them in the sink
 type TCPLineProtocolListener struct {
-	Sink pointsource.PointSink
+	Sink ingest.PointSink
 }
 
 // Listen loops endlessly, accepting tcp connections

@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"io"
 	"math/rand"
 	"runtime"
 	"testing"
@@ -33,10 +32,10 @@ func TestPointFifo(t *testing.T) {
 	runtime.GC()
 
 	for i := 0; i < 100; i++ {
-		pointra, err := pf.GetPoint()
+		pointra, ok := pf.GetPoint()
 
-		if err != nil {
-			t.Errorf("error: %v", err)
+		if !ok {
+			t.Error("no value available")
 		}
 
 		if pointra.Time == 0 {
@@ -46,9 +45,9 @@ func TestPointFifo(t *testing.T) {
 		t.Log(pointra)
 	}
 
-	_, err := pf.GetPoint()
+	_, ok := pf.GetPoint()
 
-	if err != io.EOF {
-		t.Errorf("error should be io.EOF: %v", err)
+	if ok {
+		t.Error("didn't expect more values")
 	}
 }
