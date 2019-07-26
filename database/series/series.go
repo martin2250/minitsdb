@@ -3,13 +3,9 @@ package series
 import (
 	"errors"
 	"fmt"
-	"io"
 	"math"
-	"os"
 	"regexp"
 	"time"
-
-	"github.com/golang/glog"
 
 	"github.com/martin2250/minitsdb/encoder"
 
@@ -161,14 +157,13 @@ func OpenSeries(seriespath string) (Series, error) {
 	for i, bc := range conf.Buckets {
 		timeStep *= int64(bc.Factor)
 
-		s.Buckets[i].series = &s
-		s.Buckets[i].TimeResolution = timeStep
+		s.Buckets[i], err = NewBucket(&s, timeStep)
 
-		s.Buckets[i].First = (i == 0)
-
-		if err := s.Buckets[i].checkTimeLast(); err != nil {
+		if err != nil {
 			return Series{}, err
 		}
+
+		s.Buckets[i].First = (i == 0)
 	}
 
 	// create columns
@@ -232,56 +227,14 @@ func OpenSeries(seriespath string) (Series, error) {
 func (s *Series) checkFirstBucket() error {
 	b := &s.Buckets[0]
 
-	times, err := b.GetDataFiles()
+	buf, err := b.getLastBlock()
 
 	if err != nil {
-		return err
-	}
-
-	// no file to read
-	if len(times) < 1 {
-		glog.Info("no files in bucket")
-		return nil
-	}
-
-	lastPath := b.GetFileName(times[len(times)-1])
-
-	// check file size
-	stat, err := os.Stat(lastPath)
-
-	if err != nil {
-		return err
-	}
-
-	size := stat.Size()
-
-	if size%4096 != 0 {
-		return errors.New("file damaged")
-	}
-
-	blocks := size / 4096
-
-	// no blocks to read
-	if blocks < 1 {
-		return nil
-	}
-
-	// open file
-	file, err := os.Open(lastPath)
-
-	if err != nil {
-		return err
-	}
-
-	defer file.Close()
-
-	// seek last block
-	if _, err = file.Seek((blocks-1)*4096, io.SeekStart); err != nil {
 		return err
 	}
 
 	// read last block
-	header, values, err := encoder.ReadBlock(file)
+	header, values, err := encoder.ReadBlock(&buf)
 
 	if err != nil {
 		return err

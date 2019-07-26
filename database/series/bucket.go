@@ -2,7 +2,6 @@ package series
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -112,7 +111,7 @@ func (b *Bucket) loadFiles() error {
 		size := file.Size()
 
 		if size%4096 != 0 {
-			return errors.New("file damaged")
+			return fmt.Errorf("file damaged %s", file.Name())
 		}
 
 		blocks := size / 4096
@@ -164,56 +163,14 @@ func (b Bucket) getLastBlock() (bytes.Buffer, error) {
 // checkTimeLast sets TimeLast from last block on disk
 // this function is called by LoadSeries
 func (b *Bucket) checkTimeLast() error {
-	times, err := b.GetDataFiles()
+	buf, err := b.getLastBlock()
 
 	if err != nil {
-		return err
-	}
-
-	// no file to read
-	if len(times) < 1 {
-		glog.Info("no files in bucket")
-		return nil
-	}
-
-	lastPath := b.GetFileName(times[len(times)-1])
-
-	// check file size
-	stat, err := os.Stat(lastPath)
-
-	if err != nil {
-		return err
-	}
-
-	size := stat.Size()
-
-	if size%4096 != 0 {
-		return errors.New("file damaged")
-	}
-
-	blocks := size / 4096
-
-	// no blocks to read
-	if blocks < 1 {
-		return nil
-	}
-
-	// open file
-	file, err := os.Open(lastPath)
-
-	if err != nil {
-		return err
-	}
-
-	defer file.Close()
-
-	// seek last block
-	if _, err = file.Seek((blocks-1)*4096, io.SeekStart); err != nil {
 		return err
 	}
 
 	// read last block
-	header, err := encoder.DecodeHeader(file)
+	header, err := encoder.DecodeHeader(&buf)
 
 	if err != nil {
 		return err
@@ -222,4 +179,22 @@ func (b *Bucket) checkTimeLast() error {
 	b.TimeLast = header.TimeLast
 
 	return nil
+}
+
+// NewBucket creates a bucket and loads relevant data from disk
+func NewBucket(s *Series, res int64) (Bucket, error) {
+	b := Bucket{
+		series:         s,
+		TimeResolution: res,
+	}
+
+	if err := b.loadFiles(); err != nil {
+		return Bucket{}, err
+	}
+
+	if err := b.checkTimeLast(); err != nil {
+		return Bucket{}, err
+	}
+
+	return b, nil
 }
