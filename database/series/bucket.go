@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"os"
 	"path"
 	"strconv"
@@ -12,7 +13,7 @@ import (
 	"github.com/martin2250/minitsdb/util"
 
 	"github.com/golang/glog"
-	"github.com/martin2250/minitsdb/encoder"
+	"github.com/martin2250/minitsdb/database/series/encoder"
 )
 
 // DataFile represents a file in the bucket's database directory
@@ -83,13 +84,32 @@ func (b Bucket) GetDataFiles() ([]int64, error) {
 }
 
 func (b *Bucket) loadFiles() error {
-	files, err := ioutil.ReadDir(b.GetPath())
+	b.DataFiles = make([]DataFile, 0)
+
+	// check if bucket folder exists
+	stat, err := os.Stat(b.GetPath())
+
+	// create if not exists
+	if os.IsNotExist(err) {
+		os.Mkdir(b.GetPath(), 0755)
+		return nil
+	}
 
 	if err != nil {
 		return err
 	}
 
-	b.DataFiles = make([]DataFile, 0)
+	// check if directory
+	if !stat.IsDir() {
+		return fmt.Errorf("bucket dir %s is a file", b.GetPath())
+	}
+
+	// list database files
+	files, err := ioutil.ReadDir(b.GetPath())
+
+	if err != nil {
+		return err
+	}
 
 	for _, file := range files {
 		if file.IsDir() {
@@ -163,7 +183,13 @@ func (b Bucket) getLastBlock() (bytes.Buffer, error) {
 // checkTimeLast sets TimeLast from last block on disk
 // this function is called by LoadSeries
 func (b *Bucket) checkTimeLast() error {
+	b.TimeLast = math.MinInt64
+
 	buf, err := b.getLastBlock()
+
+	if err == io.EOF {
+		return nil
+	}
 
 	if err != nil {
 		return err

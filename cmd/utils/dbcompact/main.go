@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/martin2250/minitsdb/encoder"
+	"github.com/martin2250/minitsdb/database/series/encoder"
 )
 
 var opts struct {

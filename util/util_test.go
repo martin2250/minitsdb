@@ -55,3 +55,15 @@ func TestIsSubsetDifferent(t *testing.T) {
 		t.Error("should return false")
 	}
 }
+
+func TestRoundUp(t *testing.T) {
+	if RoundUp(59, 20) != 60 {
+		t.Error("fail 1")
+	}
+	if RoundUp(60, 20) != 60 {
+		t.Error("fail 1")
+	}
+	if RoundUp(61, 20) != 80 {
+		t.Error("fail 1")
+	}
+}

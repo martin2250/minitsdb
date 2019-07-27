@@ -9,14 +9,13 @@ import (
 	"github.com/martin2250/minitsdb/ingest"
 )
 
-// HTTPLineProtocolHandlergo handles http POST requests and stores incoming points to a point sink
-type HTTPLineProtocolHandlergo struct {
+// HTTPLineProtocolHandler handles http POST requests and stores incoming points to a point sink
+type HTTPLineProtocolHandler struct {
 	Sink ingest.PointSink
 }
 
 // ServeHTTP processes a POST request with line protocol data
-func (h HTTPLineProtocolHandlergo) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-
+func (h HTTPLineProtocolHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != "POST" {
 		log.Printf("invalid method: %s\n", request.Method)
 		return

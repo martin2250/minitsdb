@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/martin2250/minitsdb/encoder"
+	"github.com/martin2250/minitsdb/database/series/encoder"
 )
 
 func query(writer http.ResponseWriter, from int64, to int64) error {

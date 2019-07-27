@@ -5,20 +5,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/martin2250/minitsdb/encoder"
+	"github.com/martin2250/minitsdb/database/series/encoder"
 	"github.com/martin2250/minitsdb/util"
-)
-
-// Aggregation selects how to merge multiple values into a query point
-type Aggregation int
-
-const (
-	// Mean calulates the arithmetic mean of all values
-	Mean Aggregation = iota
-	// Min selects the smallest of all values
-	Min
-	// Max selects the largest of all values
-	Max
 )
 
 // QueryColumn is the combination of a column and aggregation
@@ -34,8 +22,8 @@ type QueryParameters struct {
 	Columns  []QueryColumn
 }
 
-// QueryState is used to read data from a bucket
-type QueryState struct {
+// BucketReader is used to read data from a bucket
+type BucketReader struct {
 	bucket      Bucket
 	fileTimes   []int64  // start times of files to be queried
 	currentFile *os.File // file that is currently being read
@@ -51,7 +39,7 @@ var ErrQueryError = fmt.Errorf("Read error")
 // ReadNextBlock reads one 4k block and returns the values as values[point][column]
 // when there are no more points to read, ErrQueryEnd returned. values might still contain valid data
 // subsequent reads will also return ErrQueryEnd
-func (q *QueryState) ReadNextBlock() ([][]int64, error) {
+func (q *BucketReader) ReadNextBlock() ([][]int64, error) {
 	// check if is query exhausted
 	if q.currentFile == nil {
 		return nil, ErrQueryEnd
@@ -122,7 +110,7 @@ func (q *QueryState) ReadNextBlock() ([][]int64, error) {
 // CreateQuery creates a Query on a Bucket
 // from, to: time range
 // columns: list of columns to return
-func (b Bucket) CreateQuery(params QueryParameters) (q QueryState, err error) {
+func (b Bucket) CreateQuery(params QueryParameters) (q BucketReader, err error) {
 	q.params = params
 	q.params.TimeFrom = util.RoundDown(q.params.TimeFrom, b.PointsPerFile)
 	q.params.TimeTo = util.RoundDown(q.params.TimeTo, b.PointsPerFile)
@@ -132,14 +120,14 @@ func (b Bucket) CreateQuery(params QueryParameters) (q QueryState, err error) {
 	q.fileTimes, err = b.GetDataFiles()
 
 	if err != nil {
-		return QueryState{}, err
+		return BucketReader{}, err
 	}
 
 	// find first file that contains data points for the query
 	for len(q.fileTimes) > 0 {
 		// check if file start after query range
 		if q.fileTimes[0] >= q.params.TimeTo {
-			return QueryState{}, ErrQueryEnd
+			return BucketReader{}, ErrQueryEnd
 		}
 
 		// check if file ends before query range
@@ -153,7 +141,7 @@ func (b Bucket) CreateQuery(params QueryParameters) (q QueryState, err error) {
 		q.fileTimes = q.fileTimes[1:]
 
 		if err != nil {
-			return QueryState{}, err
+			return BucketReader{}, err
 		}
 
 		// find first block to contain data for the query
@@ -165,7 +153,7 @@ func (b Bucket) CreateQuery(params QueryParameters) (q QueryState, err error) {
 
 			if err != nil {
 				q.currentFile.Close()
-				return QueryState{}, err
+				return BucketReader{}, err
 			}
 
 			// decode header
@@ -177,12 +165,12 @@ func (b Bucket) CreateQuery(params QueryParameters) (q QueryState, err error) {
 					break
 				}
 				q.currentFile.Close()
-				return QueryState{}, err
+				return BucketReader{}, err
 			}
 
 			// check if block starts after the query range ends
 			if int64(header.TimeFirst) > q.params.TimeTo {
-				return QueryState{}, ErrQueryEnd
+				return BucketReader{}, ErrQueryEnd
 			}
 
 			// check if block ends after the query range starts
@@ -191,7 +179,7 @@ func (b Bucket) CreateQuery(params QueryParameters) (q QueryState, err error) {
 
 				if err != nil {
 					q.currentFile.Close()
-					return QueryState{}, err
+					return BucketReader{}, err
 				}
 
 				return q, nil
@@ -205,5 +193,5 @@ func (b Bucket) CreateQuery(params QueryParameters) (q QueryState, err error) {
 	}
 
 	// no files remaining
-	return QueryState{}, ErrQueryEnd
+	return BucketReader{}, ErrQueryEnd
 }

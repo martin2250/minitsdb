@@ -23,6 +23,15 @@ func RoundDown(value, modulo int64) int64 {
 	return (value / modulo) * modulo
 }
 
+// RoundUp rounds down value to next multiple of modulo
+// only works for positive integers
+func RoundUp(value, modulo int64) int64 {
+	if value < 0 {
+		return 0
+	}
+	return ((value + modulo - 1) / modulo) * modulo
+}
+
 // InsertFileBlock uses fallocate syscall to insert one or multiple empty blocks
 // in the middle of a file, pushing back the contents that follow
 func InsertFileBlock(file *os.File, offset, length int64) error {

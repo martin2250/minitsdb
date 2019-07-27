@@ -3,11 +3,12 @@ package series
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"regexp"
 	"time"
 
-	"github.com/martin2250/minitsdb/encoder"
+	"github.com/martin2250/minitsdb/database/series/encoder"
 
 	"github.com/martin2250/minitsdb/ingest"
 	"github.com/martin2250/minitsdb/util"
@@ -228,6 +229,10 @@ func (s *Series) checkFirstBucket() error {
 	b := &s.Buckets[0]
 
 	buf, err := b.getLastBlock()
+
+	if err == io.EOF {
+		return nil
+	}
 
 	if err != nil {
 		return err

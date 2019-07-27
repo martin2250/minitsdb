@@ -5,7 +5,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/martin2250/minitsdb/encoder"
+	"github.com/martin2250/minitsdb/database/series/encoder"
 )
 
 // ErrColumnMismatch indicates that blocks in a file have inconsistent numbers of columns

@@ -3,8 +3,10 @@ package pointlistener
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"strings"
 
 	"github.com/martin2250/minitsdb/ingest"
 )
@@ -44,12 +46,16 @@ func (tl TCPLineProtocolListener) handleTCP(c net.Conn) {
 	for {
 		line, err := r.ReadString('\n')
 
+		if err == io.EOF {
+			break
+		}
+
 		if err != nil {
 			log.Printf("conn err: %v\n", err)
 			break
 		}
 
-		point, err := ingest.ParsePoint(line)
+		point, err := ingest.ParsePoint(strings.TrimSpace(line))
 
 		// don't close connection on parse error
 		if err != nil {
