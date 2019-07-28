@@ -2,45 +2,31 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"net/rpc"
+	"github.com/martin2250/minitsdb/ingest/pointlistener"
+	"time"
 
 	"github.com/martin2250/minitsdb/ingest"
-	"github.com/martin2250/minitsdb/minitsdb"
 )
 
-var session minitsdb.ServerSession
-
 func main() {
-	var err error
-	session, err = minitsdb.LoadDatabase("/home/martin/go/src/github.com/martin2250/minitsdb/database")
+	buffer := ingest.NewPointList()
 
-	if err != nil {
-		panic(err)
+	tcpl := pointlistener.TCPLineProtocolListener{
+		Sink: &buffer,
 	}
 
-	err = session.LoadSeries()
+	go tcpl.Listen(8001)
 
-	if err != nil {
-		panic(err)
+	for {
+		point, ok := buffer.GetPoint()
+
+		if ok {
+			_, ok := point.Tags["shit"]
+			if ok {
+				fmt.Println("k")
+			}
+		} else {
+			time.Sleep(time.Millisecond)
+		}
 	}
-
-	client, err := rpc.DialHTTP("tcp", "localhost:2002")
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	var point ingest.Point
-	err = client.Call("Buffer.PopPoint", 0, &point)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Println(point)
-
-	// http.HandleFunc("/insert", handleInsert)
-
-	// http.ListenAndServe(":8080", nil)
 }

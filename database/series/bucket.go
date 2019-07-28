@@ -18,9 +18,8 @@ import (
 
 // DataFile represents a file in the bucket's database directory
 type DataFile struct {
-	TimeStart int64
-	Blocks    int64
-	Path      string
+	Blocks int64
+	Path   string
 }
 
 // Bucket is a downsampling step
@@ -32,9 +31,12 @@ type Bucket struct {
 	TimeLast int64
 	// time between points
 	TimeResolution int64
-	PointsPerFile  int64
 
-	DataFiles []DataFile
+	// number of points in a file
+	PointsPerFile int
+
+	// index: start time
+	DataFiles map[int64]*DataFile
 
 	// indicates if this is the first (highest resolution) bucket (contains no aggregations)
 	First bool
@@ -72,7 +74,7 @@ func (b Bucket) GetDataFiles() ([]int64, error) {
 			continue
 		}
 
-		if fileStartTime%(b.TimeResolution*b.PointsPerFile) != 0 {
+		if fileStartTime%(b.TimeResolution*int64(b.PointsPerFile)) != 0 {
 			glog.Warningf("stray file %s", file.Name())
 			continue
 		}
@@ -84,7 +86,7 @@ func (b Bucket) GetDataFiles() ([]int64, error) {
 }
 
 func (b *Bucket) loadFiles() error {
-	b.DataFiles = make([]DataFile, 0)
+	b.DataFiles = make(map[int64]*DataFile, 0)
 
 	// check if bucket folder exists
 	stat, err := os.Stat(b.GetPath())
@@ -123,7 +125,7 @@ func (b *Bucket) loadFiles() error {
 			continue
 		}
 
-		if fileStartTime%(b.TimeResolution*b.PointsPerFile) != 0 {
+		if fileStartTime%(b.TimeResolution*int64(b.PointsPerFile)) != 0 {
 			glog.Warningf("stray file %s", file.Name())
 			continue
 		}
@@ -143,12 +145,11 @@ func (b *Bucket) loadFiles() error {
 		}
 
 		df := DataFile{
-			Path:      path.Join(b.GetPath(), file.Name()),
-			TimeStart: fileStartTime,
-			Blocks:    blocks,
+			Path:   path.Join(b.GetPath(), file.Name()),
+			Blocks: blocks,
 		}
 
-		b.DataFiles = append(b.DataFiles, df)
+		b.DataFiles[fileStartTime] = &df
 	}
 
 	return nil
@@ -161,10 +162,19 @@ func (b Bucket) getLastBlock() (bytes.Buffer, error) {
 		return bytes.Buffer{}, io.EOF
 	}
 
-	df := b.DataFiles[len(b.DataFiles)-1]
+	// find last data file
+	var dfLast *DataFile
+	var timeLast int64 = math.MinInt64
+
+	for time, df := range b.DataFiles {
+		if time > timeLast {
+			time = timeLast
+			dfLast = df
+		}
+	}
 
 	// open file
-	file, err := os.Open(df.Path)
+	file, err := os.Open(dfLast.Path)
 
 	if err != nil {
 		return bytes.Buffer{}, err
@@ -173,7 +183,7 @@ func (b Bucket) getLastBlock() (bytes.Buffer, error) {
 	defer file.Close()
 
 	// seek last block
-	if _, err = file.Seek((df.Blocks-1)*4096, io.SeekStart); err != nil {
+	if _, err = file.Seek((dfLast.Blocks-1)*4096, io.SeekStart); err != nil {
 		return bytes.Buffer{}, err
 	}
 
@@ -208,10 +218,12 @@ func (b *Bucket) checkTimeLast() error {
 }
 
 // NewBucket creates a bucket and loads relevant data from disk
+// todo: read PointsPerFile from config
 func NewBucket(s *Series, res int64) (Bucket, error) {
 	b := Bucket{
 		series:         s,
 		TimeResolution: res,
+		PointsPerFile:  3600 * 24,
 	}
 
 	if err := b.loadFiles(); err != nil {
@@ -223,4 +235,83 @@ func NewBucket(s *Series, res int64) (Bucket, error) {
 	}
 
 	return b, nil
+}
+
+// WriteBlock returns the number of values written
+func (b *Bucket) WriteBlock(values [][]int64) (int, error) {
+	if len(values[0]) == 0 {
+		return 0, nil
+	}
+	// check that all values belong to same file
+	indexEnd := -1
+	timeFileStart := util.RoundDown(values[0][0], int64(b.PointsPerFile))
+
+	for i, t := range values[0] {
+		if timeFileStart != util.RoundDown(t, int64(b.PointsPerFile)) {
+			indexEnd = i
+			break
+		}
+	}
+
+	if indexEnd != -1 {
+		for i := range values {
+			values[i] = values[i][:indexEnd]
+		}
+	}
+
+	block, count, err := encoder.EncodeBlock(values)
+
+	if err != nil {
+		return 0, err
+	}
+
+	// create new data file if not indexed yet
+	dataFile, ok := b.DataFiles[timeFileStart]
+
+	if !ok {
+		dataFile = &DataFile{
+			Blocks: 0,
+			Path:   b.GetFileName(timeFileStart),
+		}
+		b.DataFiles[timeFileStart] = dataFile
+	} else {
+		// check file for corruption
+		info, err := os.Stat(dataFile.Path)
+
+		if err != nil {
+			return 0, err
+		}
+
+		if info.Size()%4096 != 0 {
+			return 0, fmt.Errorf("file size %d not multiple of 4096", info.Size())
+		}
+	}
+
+	// open or create file
+	//var file *os.File
+	file, err := os.OpenFile(dataFile.Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	//if ok {
+	//} else {
+	//	file, err = os.Create(dataFile.Path)
+	//}
+
+	if err != nil {
+		return 0, err
+	}
+
+	n, err := block.WriteTo(file)
+
+	if err != nil {
+		return 0, err
+	}
+
+	if n != 4096 {
+		return 0, fmt.Errorf("failed to write full 4096 bytes, only wrote %d", n)
+	}
+
+	file.Close()
+
+	dataFile.Blocks++
+
+	return count, nil
 }

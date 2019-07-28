@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"regexp"
 	"time"
 
 	"github.com/martin2250/minitsdb/database/series/encoder"
@@ -59,11 +58,9 @@ func (s *Series) InsertPoint(p ingest.Point) error {
 	}
 
 	// assign point values to columns
-	indices := make([]int, len(s.Columns))
-	// set all to -1 to indicate that no matching value was found in point (yet)
-	for i := range indices {
-		indices[i] = -1
-	}
+	// indices [index of point.Values] = index of s.Values
+	indices := make([]int, len(p.Values))
+
 	// go through all values in point
 	for indexValue, value := range p.Values {
 		indicesCol := s.GetIndices(value.Tags)
@@ -74,28 +71,44 @@ func (s *Series) InsertPoint(p ingest.Point) error {
 			return ErrColumnAmbiguous
 		}
 
-		indexColumn := indicesCol[0]
+		iCol := indicesCol[0] + 1
 
-		// check two points match this column
-		if indices[indexColumn] != -1 {
-			return ErrColumnMismatch
+		for _, iColOther := range indices {
+			if iCol == iColOther {
+				return ErrColumnMismatch
+			}
 		}
 
-		indices[indexColumn] = indexValue
+		indices[indexValue] = iCol // account for time column
 	}
 
 	// check if any column didn't receive a value (this shouldn't happen based on previous checks)
 	for _, i := range indices {
-		if i == -1 {
+		if i == 0 {
 			return ErrColumnMismatch
 		}
 	}
 
-	for indexColumn, indexPoint := range indices {
+	// check if there is already a value at the point's time
+	indexBuffer := util.IndexOfInt64(s.Values[0], p.Time)
+
+	if indexBuffer == -1 {
+		// time not present in buffer, append to buffer
+		indexBuffer = len(s.Values[0])
+
+		for i := range s.Values {
+			s.Values[i] = append(s.Values[i], 0)
+		}
+
+		s.Values[0][indexBuffer] = p.Time
+	}
+
+	// todo: tidy up this hot mess that is indexColumn
+	for indexPoint, indexColumn := range indices {
 		valf := p.Values[indexPoint].Value
-		valf *= math.Pow10(s.Columns[indexColumn].Decimals)
+		valf *= math.Pow10(s.Columns[indexColumn-1].Decimals)
 		vali := int64(math.Round(valf))
-		s.Values[indexColumn] = append(s.Values[indexColumn], vali)
+		s.Values[indexColumn][indexBuffer] = vali
 	}
 
 	return nil
@@ -116,7 +129,8 @@ func (s Series) GetIndices(tags map[string]string) []int {
 				break
 			}
 
-			ok, _ = regexp.MatchString(queryValue, columnValue)
+			//ok, _ = regexp.MatchString(queryValue, columnValue)
+			ok = queryValue == columnValue
 			if !ok {
 				matches = false
 				break
@@ -246,7 +260,7 @@ func (s *Series) checkFirstBucket() error {
 	}
 
 	// check if database file matches series
-	if int(header.NumColumns) != len(s.Columns) {
+	if int(header.NumColumns) != (len(s.Columns) + 1) {
 		return errors.New("database file does not match series")
 	}
 
@@ -254,6 +268,34 @@ func (s *Series) checkFirstBucket() error {
 	if int(header.BytesUsed) < s.ReuseMax {
 		s.OverwriteLast = true
 		s.Values = values
+	}
+
+	return nil
+}
+
+func (s *Series) CheckFlush() bool {
+	if len(s.Values[0]) > s.BufferSize {
+		return true
+	}
+
+	// todo: also check against last write and flushdelay
+
+	return false
+}
+
+func (s *Series) Flush() error {
+	count, err := s.Buckets[0].WriteBlock(s.Values)
+
+	if err != nil {
+		return err
+	}
+
+	for i := range s.Values {
+		// copy to new buffer to allow GC to work
+		// todo: make this not happen every time
+		newbuffer := make([]int64, len(s.Values[i])-count)
+		copy(newbuffer, s.Values[i][count:])
+		s.Values[i] = newbuffer
 	}
 
 	return nil

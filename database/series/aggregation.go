@@ -1,5 +1,5 @@
 package series
 
 type Aggregator interface {
-	Aggregate() int64
+	AggregateFirst(i []int64) int64
 }

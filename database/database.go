@@ -2,8 +2,6 @@ package database
 
 import (
 	"errors"
-	"regexp"
-
 	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/ingest"
 )
@@ -28,7 +26,8 @@ func (ss Database) FindSeries(tags map[string]string) []int {
 				break
 			}
 
-			ok, _ = regexp.MatchString(queryValue, seriesValue)
+			//ok, _ = regexp.MatchString(queryValue, seriesValue)
+			ok = queryValue == seriesValue
 			if !ok {
 				matches = false
 				break
@@ -61,5 +60,16 @@ func (ss *Database) InsertPoint(p ingest.Point) error {
 		return ErrSeriesAmbiguous
 	}
 
-	return ss.Series[indices[0]].InsertPoint(p)
+	err := ss.Series[indices[0]].InsertPoint(p)
+
+	if err != nil {
+		return err
+	}
+
+	if ss.Series[indices[0]].CheckFlush() {
+		err = ss.Series[indices[0]].Flush()
+		return err
+	}
+
+	return nil
 }

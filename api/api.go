@@ -1,22 +1,19 @@
 package api
 
 import (
+	"fmt"
+	"github.com/martin2250/minitsdb/database/query"
+	"github.com/martin2250/minitsdb/database/series"
 	"log"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/martin2250/minitsdb/database"
 
 	fifo "github.com/foize/go.fifo"
-	"github.com/martin2250/minitsdb/database/series"
 )
-
-// QueryExecutor gets queued by the http goroutine and is executed by the main database thread
-type QueryExecutor struct {
-	responseWriter http.ResponseWriter
-
-	series []series.Series
-}
 
 // DatabaseAPI holds information on the
 type DatabaseAPI struct {
@@ -24,28 +21,35 @@ type DatabaseAPI struct {
 	database *database.Database
 }
 
-// AddQuery enqueues a query to be executed on the next query cycle
-// func (api DatabaseAPI) AddQuery(q QueryExecutor) {
-// 	api.queries.Add(q)
-// }
+func NewDatabaseAPI(db *database.Database) DatabaseAPI {
+	return DatabaseAPI{
+		queries:  fifo.NewQueue(),
+		database: db,
+	}
+}
 
-// GetQuery returns the oldest query from the query buffer
-// returns false if no query is available
-// func (api DatabaseAPI) GetQuery() (QueryExecutor, bool) {
-// 	queryi := api.queries.Next()
+//AddQuery enqueues a query to be executed on the next query cycle
+func (api DatabaseAPI) AddQuery(q query.Query) {
+	api.queries.Add(q)
+}
 
-// 	if queryi == nil {
-// 		return nil, false
-// 	}
+//GetQuery returns the oldest query from the query buffer
+//returns false if no query is available
+func (api DatabaseAPI) GetQuery() (query.Query, bool) {
+	queryi := api.queries.Next()
 
-// 	query, ok := queryi.(QueryExecutor)
+	if queryi == nil {
+		return query.Query{}, false
+	}
 
-// 	if !ok {
-// 		return nil, false
-// 	}
+	q, ok := queryi.(query.Query)
 
-// 	return query, true
-// }
+	if !ok {
+		return query.Query{}, false
+	}
+
+	return q, true
+}
 
 // ServeHTTP handles http requests to the query API, must be registered under /query
 func (api DatabaseAPI) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -59,33 +63,62 @@ func (api DatabaseAPI) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 	p, err := parseQuery(request.Body)
 
 	if err != nil {
-		serveError(writer, err.Error())
+		http.Error(writer, "can't parse query", http.StatusBadRequest)
 		log.Println(err)
 		return
 	}
 
-	// find matching series
-	series := api.database.FindSeries(p.Series)
+	// create query parameters
+	param := query.Parameters{
+		TimeStep:  p.Resolution,
+		Columns:   make([]query.Column, 0),
+		TimeStart: p.TimeFrom,
+		TimeEnd:   p.TimeTo,
+	}
 
-	if len(series) < 1 {
-		serveError(writer, "no series match query")
+	// find matching series
+	matches := api.database.FindSeries(p.Series)
+
+	if len(matches) < 1 {
+		http.Error(writer, "no series match query", http.StatusNotFound)
 		return
 	}
 
 	// create query objects
 	if strings.HasPrefix(request.URL.Path, "/query/text") {
+		for _, i := range matches {
+			psers := param
 
+			for _, colspec := range p.Columns {
+				cols := api.database.Series[i].GetIndices(colspec)
+				for _, index := range cols {
+					psers.Columns = append(psers.Columns, query.Column{
+						Index:       index,
+						Downsampler: series.DownsamplerMean,
+					})
+				}
+			}
+
+			query := query.NewQuery(&api.database.Series[i], psers, writer)
+
+			query.Done = make(chan struct{})
+
+			api.queries.Add(query)
+
+			writer.Write([]byte("test\n"))
+
+			select {
+			case <-time.After(60 * time.Second):
+				writer.Write([]byte("timeout, motherfucker!\n"))
+			case <-query.Done:
+				fmt.Fprint(os.Stderr, "done\n")
+			}
+		}
+		return
+	} else if strings.HasPrefix(request.URL.Path, "/query/binary") {
+		http.Error(writer, "binary query api not implemented", http.StatusNotImplemented)
+		return
 	}
 
-	if strings.HasPrefix(request.URL.Path, "/query/binary") {
-		serveError(writer, "binary query api not implemented")
-	}
-
-	serveError(writer, "invalid path")
-}
-
-func serveError(writer http.ResponseWriter, err string) {
-	writer.WriteHeader(400)
-
-	writer.Write([]byte("error: " + err))
+	http.Error(writer, "invalid path", http.StatusNotFound)
 }

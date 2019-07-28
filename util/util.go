@@ -74,3 +74,14 @@ func ReadBlock(r io.Reader) (bytes.Buffer, error) {
 
 	return b, nil
 }
+
+// IndexOfInt64 returns the index of the first element of 'column' that matches 'element'
+// returns -1 if no element matches
+func IndexOfInt64(column []int64, element int64) int {
+	for i, ct := range column {
+		if element == ct {
+			return i
+		}
+	}
+	return -1
+}

@@ -9,7 +9,7 @@ func main() {
 	// 	PointsPerFile: 604800, //24 * 3600,
 	// }
 
-	// q, err := b.CreateQuery(1561334400+5655, 1562112000+77777, []int{0, 1})
+	// q, err := b.CreateReader(1561334400+5655, 1562112000+77777, []int{0, 1})
 
 	// if err != nil {
 	// 	log.Fatalln(err)

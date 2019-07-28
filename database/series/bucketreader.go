@@ -9,17 +9,11 @@ import (
 	"github.com/martin2250/minitsdb/util"
 )
 
-// QueryColumn is the combination of a column and aggregation
-type QueryColumn struct {
-	Column int
-	Type   Aggregation
-}
-
-// QueryParameters holds the parameters of a query
-type QueryParameters struct {
+// BucketReaderParameters holds the parameters of a query
+type BucketReaderParameters struct {
 	TimeFrom int64
 	TimeTo   int64
-	Columns  []QueryColumn
+	Columns  []int
 }
 
 // BucketReader is used to read data from a bucket
@@ -27,11 +21,11 @@ type BucketReader struct {
 	bucket      Bucket
 	fileTimes   []int64  // start times of files to be queried
 	currentFile *os.File // file that is currently being read
-	params      QueryParameters
+	params      BucketReaderParameters
 }
 
 // ErrQueryEnd indicated no more values to read
-var ErrQueryEnd = fmt.Errorf("Query has no more values")
+var ErrQueryEnd = io.EOF // fmt.Errorf("Query has no more values")
 
 // ErrQueryError indicated read error
 var ErrQueryError = fmt.Errorf("Read error")
@@ -101,44 +95,50 @@ func (q *BucketReader) ReadNextBlock() ([][]int64, error) {
 
 	// todo: check if columns are ok
 	for i, col := range q.params.Columns {
-		valuesOut[i] = values[col.Column][indexStart:indexEnd]
+		valuesOut[i] = values[col][indexStart:indexEnd]
 	}
 
 	return valuesOut, err
 }
 
-// CreateQuery creates a Query on a Bucket
+func (r *BucketReader) Close() {
+	r.currentFile.Close()
+}
+
+// CreateReader creates a Query on a Bucket
 // from, to: time range
 // columns: list of columns to return
-func (b Bucket) CreateQuery(params QueryParameters) (q BucketReader, err error) {
-	q.params = params
-	q.params.TimeFrom = util.RoundDown(q.params.TimeFrom, b.PointsPerFile)
-	q.params.TimeTo = util.RoundDown(q.params.TimeTo, b.PointsPerFile)
-	q.bucket = b
+func (b Bucket) CreateReader(params BucketReaderParameters) (r BucketReader, err error) {
+	//return BucketReader{}, errors.New("this must be fixed ASAP")
+	r.params = params
+	r.params.TimeFrom = util.RoundDown(r.params.TimeFrom, b.TimeResolution)
+	r.params.TimeTo = util.RoundDown(r.params.TimeTo, b.TimeResolution)
+	r.bucket = b
 
 	// get a list of all files in that bucket
-	q.fileTimes, err = b.GetDataFiles()
+	r.fileTimes, err = b.GetDataFiles()
 
 	if err != nil {
 		return BucketReader{}, err
 	}
 
 	// find first file that contains data points for the query
-	for len(q.fileTimes) > 0 {
+	for len(r.fileTimes) > 0 {
 		// check if file start after query range
-		if q.fileTimes[0] >= q.params.TimeTo {
+		if r.fileTimes[0] >= r.params.TimeTo {
 			return BucketReader{}, ErrQueryEnd
 		}
 
 		// check if file ends before query range
-		if q.fileTimes[0] < util.RoundDown(q.params.TimeFrom, b.PointsPerFile) {
-			q.fileTimes = q.fileTimes[1:]
+		// todo: check this, not sure if logic sound
+		if r.fileTimes[0] < util.RoundDown(r.params.TimeFrom, int64(b.PointsPerFile)) {
+			r.fileTimes = r.fileTimes[1:]
 			continue
 		}
 
 		// open database file
-		q.currentFile, err = os.Open(b.GetFileName(q.fileTimes[0]))
-		q.fileTimes = q.fileTimes[1:]
+		r.currentFile, err = os.Open(b.GetFileName(r.fileTimes[0]))
+		r.fileTimes = r.fileTimes[1:]
 
 		if err != nil {
 			return BucketReader{}, err
@@ -149,49 +149,49 @@ func (b Bucket) CreateQuery(params QueryParameters) (q BucketReader, err error) 
 
 		for {
 			// go to start of block
-			_, err := q.currentFile.Seek(blockIndex*4096, io.SeekStart)
+			_, err := r.currentFile.Seek(blockIndex*4096, io.SeekStart)
 
 			if err != nil {
-				q.currentFile.Close()
+				r.currentFile.Close()
 				return BucketReader{}, err
 			}
 
 			// decode header
-			header, err := encoder.DecodeHeader(q.currentFile)
+			header, err := encoder.DecodeHeader(r.currentFile)
 
 			if err != nil {
 				// end of file = check next file
 				if err == io.EOF {
 					break
 				}
-				q.currentFile.Close()
+				r.currentFile.Close()
 				return BucketReader{}, err
 			}
 
 			// check if block starts after the query range ends
-			if int64(header.TimeFirst) > q.params.TimeTo {
+			if int64(header.TimeFirst) > r.params.TimeTo {
 				return BucketReader{}, ErrQueryEnd
 			}
 
 			// check if block ends after the query range starts
-			if int64(header.TimeLast) >= q.params.TimeFrom {
-				_, err = q.currentFile.Seek(blockIndex*4096, io.SeekStart)
+			if int64(header.TimeLast) >= r.params.TimeFrom {
+				_, err = r.currentFile.Seek(blockIndex*4096, io.SeekStart)
 
 				if err != nil {
-					q.currentFile.Close()
+					r.currentFile.Close()
 					return BucketReader{}, err
 				}
 
-				return q, nil
+				return r, nil
 			}
 
 			// check next block
 			blockIndex++
 		}
 
-		q.currentFile.Close()
+		r.currentFile.Close()
 	}
-
+	return r, nil
 	// no files remaining
 	return BucketReader{}, ErrQueryEnd
 }

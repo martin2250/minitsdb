@@ -18,7 +18,7 @@ type yamlQueryParameters struct {
 	LimitSeries int
 
 	// Resolution is the smallest allowed time step between points, either Points or Resolution must be set
-	Resolution int
+	Resolution int64
 	// Points is the maximum number of points returned, either Points or Resolution must be set
 	Points int
 }
@@ -43,6 +43,14 @@ func parseQuery(r io.Reader) (yamlQueryParameters, error) {
 
 	if err != nil {
 		return yamlQueryParameters{}, err
+	}
+
+	// todo: move this into API, add optional limit to number of points
+	if c.Points != -1 {
+		c.Resolution = (c.TimeTo - c.TimeFrom) / int64(c.Points)
+		if c.Resolution < 1 {
+			c.Resolution = 1
+		}
 	}
 
 	return c, nil
@@ -77,6 +85,10 @@ func (p yamlQueryParameters) Check() error {
 
 	if (p.Points == -1) == (p.Resolution == -1) {
 		return errors.New("either points or resolution, not both, must be provided")
+	}
+
+	if p.TimeFrom > p.TimeTo {
+		return errors.New("invalid time range")
 	}
 
 	return nil
