@@ -1,35 +1,35 @@
 package encoder
 
-func doZigzag(i int64) uint64 {
+func applyZigzag(i int64) uint64 {
 	return uint64((i >> 63) ^ (i << 1))
 }
 
-func undoZigzag(i uint64) int64 {
+func revertZigzag(i uint64) int64 {
 	return int64((i >> 1) ^ -(i & 1))
 }
 
-func doTransform(values []int64) []uint64 {
-	output := make([]uint64, len(values))
+func applyDiff(i []int64) []int64 {
+	o := make([]int64, len(i))
 
 	var last int64
 
-	for ival, val := range values {
-		output[ival] = doZigzag(val - last)
+	for ival, val := range i {
+		o[ival] = val - last
 		last = val
 	}
 
-	return output
+	return o
 }
 
-func undoTransform(values []uint64) []int64 {
-	output := make([]int64, len(values))
+func revertDiff(i []int64) []int64 {
+	o := make([]int64, len(i))
 
 	var sum int64
 
-	for ival, val := range values {
-		sum += undoZigzag(val)
-		output[ival] = sum
+	for ival, val := range i {
+		sum += val
+		o[ival] = sum
 	}
 
-	return output
+	return o
 }

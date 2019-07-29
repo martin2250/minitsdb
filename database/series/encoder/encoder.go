@@ -79,7 +79,8 @@ func DecodeBlock(r io.Reader, hdr *BlockHeader) (BlockHeader, [][]int64, error) 
 			points += n
 		}
 
-		values[i] = undoTransform(transformed)
+		fmt.Println(i)
+		//values[i] = undoTransform(transformed)
 	}
 
 	return header, values, nil
@@ -105,7 +106,8 @@ func EncodeBlock(values [][]int64) (bytes.Buffer, int, error) {
 	for i := range values {
 		var err error
 
-		encoded[i], err = simple8b.EncodeAll(doTransform(values[i]))
+		//encoded[i], err = simple8b.EncodeAll(doTransform(values[i]))
+		fmt.Println(i)
 
 		if err != nil {
 			return buffer, 0, err
