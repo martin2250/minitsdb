@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 
 	"github.com/jwilder/encoding/simple8b"
 	"github.com/martin2250/minitsdb/util"
@@ -28,62 +29,151 @@ type BlockHeader struct {
 	TimeLast int64
 }
 
-// DecodeHeader reads the block header from a 4096-byte data block
-func DecodeHeader(r io.Reader) (BlockHeader, error) {
-	var header BlockHeader
+type decoderState int
 
-	err := binary.Read(r, binary.LittleEndian, &header)
+const (
+	stateHeader decoderState = iota
+	stateBody
+	stateError
+)
 
-	return header, err
+type Decoder struct {
+	// Header contains the last BlockHeader read
+	Header BlockHeader
+	r      io.Reader
+	s      decoderState
+	// Columns contains a list of columns that should be decoded
+	// must be sorted by Index
+	Columns []struct {
+		Index       int
+		Transformer Transformer
+	}
 }
 
-// DecodeBlock decodes values from a 4k block
-// hdr can be nil, will read header from stream
-func DecodeBlock(r io.Reader, hdr *BlockHeader) (BlockHeader, [][]int64, error) {
-	var header BlockHeader
+func NewDecoder(r io.Reader) Decoder {
+	return Decoder{
+		r: r,
+		s: stateHeader,
+	}
+}
 
-	if hdr == nil {
-		var err error
-		header, err = DecodeHeader(r)
+// DecodeHeader reads the next block header
+func (d *Decoder) DecodeHeader() (BlockHeader, error) {
+	switch d.s {
+	case stateError:
+		return BlockHeader{}, errors.New("decoder is in error state")
+	case stateBody:
+		_, err := io.CopyN(ioutil.Discard, d.r, 4096-8*3)
 		if err != nil {
-			return header, nil, err
+			d.s = stateError
+			return BlockHeader{}, err
 		}
-		if header.BytesUsed > 4096 {
-			return header, nil, fmt.Errorf("Header claims %d bytes used", header.BytesUsed)
-		}
-	} else {
-		header = *hdr
+	}
+	err := binary.Read(d.r, binary.LittleEndian, &d.Header)
+
+	if err != nil {
+		d.s = stateError
+		return BlockHeader{}, err
 	}
 
-	values := make([][]int64, header.NumColumns)
+	d.s = stateBody
+	return d.Header, err
+}
 
-	for i := range values {
-		transformed := make([]uint64, header.NumPoints)
-		points := 0
+// DecodeBlock decodes the next block from the reader
+func (d *Decoder) DecodeBlock() ([][]int64, error) {
+	switch d.s {
+	case stateError:
+		return nil, errors.New("decoder is in error state")
+	case stateHeader:
+		_, err := d.DecodeHeader()
+		if err != nil {
+			d.s = stateError
+			return nil, err
+		}
+	}
 
-		for points < int(header.NumPoints) {
+	values := make([][]int64, len(d.Columns))
+	var (
+		// number of words read from r
+		wordsRead int = 3
+		// number of columns read from the block
+		colsRead int
+	)
+
+	for i, col := range d.Columns {
+		// check if file even contains this column
+		if col.Index >= int(d.Header.NumColumns) {
+			d.s = stateError
+			return nil, errors.New("not enough columns in block")
+		}
+		// skip columns that are not required
+		for colsRead < col.Index {
+			var pointsRead int
+			for pointsRead < int(d.Header.NumPoints) {
+				if wordsRead == 512 {
+					d.s = stateError
+					return nil, errors.New("column not complete at end of block")
+				}
+				var encoded uint64
+				err := binary.Read(d.r, binary.LittleEndian, &encoded)
+				if err != nil {
+					d.s = stateError
+					return nil, err
+				}
+				wordsRead++
+				c, err := simple8b.Count(encoded)
+				if err != nil {
+					d.s = stateError
+					return nil, err
+				}
+				pointsRead += c
+			}
+			colsRead++
+		}
+
+		transformed := make([]uint64, d.Header.NumPoints)
+
+		var pointsRead int
+		for pointsRead < int(d.Header.NumPoints) {
+			if wordsRead == 512 {
+				d.s = stateError
+				return nil, errors.New("column not complete at end of block")
+			}
+
 			var buf [240]uint64
 			var encoded uint64
-
-			if err := binary.Read(r, binary.LittleEndian, &encoded); err != nil {
-				return header, nil, err
+			if err := binary.Read(d.r, binary.LittleEndian, &encoded); err != nil {
+				d.s = stateError
+				return nil, err
 			}
-
-			n, err := simple8b.Decode(&buf, encoded)
-
+			wordsRead++
+			c, err := simple8b.Decode(&buf, encoded)
 			if err != nil {
-				return header, nil, err
+				d.s = stateError
+				return nil, err
 			}
-
-			copy(transformed[points:], buf[:n])
-			points += n
+			copy(transformed[pointsRead:], buf[:c])
+			pointsRead += c
 		}
 
-		fmt.Println(i)
-		//values[i] = undoTransform(transformed)
+		var err error
+		values[i], err = col.Transformer.Revert(transformed)
+		if err != nil {
+			d.s = stateError
+			return nil, err
+		}
 	}
 
-	return header, values, nil
+	// discard rest of block
+	_, err := io.CopyN(ioutil.Discard, d.r, int64(8*(512-wordsRead)))
+	if err != nil {
+		d.s = stateError
+		return nil, err
+	}
+
+	d.s = stateHeader
+	return values, nil
 }
 
 // ReadBlock reads exactly 4096 bytes from a io.Reader and decodes the block contained
