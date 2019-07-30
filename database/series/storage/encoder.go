@@ -9,22 +9,22 @@ import (
 // EncodeBlock encodes as many values into a 4k block as it can possibly fit
 // returns the number of data points written
 // if err == nil, exactly 4096 bytes were written to writer
-func EncodeBlock(values [][]int64, transformers []Transformer, writer io.Writer) (int, error) {
-	// check if counts match, else panic
-	if len(values) != len(transformers) {
-		panic("number of values and transformers don't match")
-	}
-
-	// tranform and encode all columns
+// values must have 255 or fewer entries
+// times is only used to fill the block header TimeFirst and TimeLast, must also be stored in values (in transformed form)
+func EncodeBlock(writer io.Writer, times []int64, values [][]uint64) (int, error) {
+	valuesAvailable := len(times)
+	// encode all columns with simple8b
 	encoded := make([][]uint64, len(values))
-	for i := range values {
-		transformed, err := transformers[i].Apply(values[i])
-
-		if err != nil {
-			return 0, err
+	for i, val := range values {
+		if len(val) != valuesAvailable {
+			panic("input slices have different lengths")
 		}
 
-		encoded[i], err = simple8b.EncodeAll(transformed)
+		valCopy := make([]uint64, valuesAvailable)
+		copy(valCopy, val)
+
+		var err error
+		encoded[i], err = simple8b.EncodeAll(valCopy)
 
 		if err != nil {
 			return 0, err
@@ -81,7 +81,7 @@ func EncodeBlock(values [][]int64, transformers []Transformer, writer io.Writer)
 		wordsTotal = wordsTotalNext
 
 		// no more values left to store
-		if valuesTotal == len(values[0]) {
+		if valuesTotal == valuesAvailable {
 			break
 		}
 	}
@@ -90,8 +90,8 @@ func EncodeBlock(values [][]int64, transformers []Transformer, writer io.Writer)
 		BlockVersion: 1,
 		NumPoints:    uint32(valuesTotal),
 		NumColumns:   uint8(len(values)),
-		TimeFirst:    values[0][0],
-		TimeLast:     values[0][valuesTotal-1],
+		TimeFirst:    times[0],
+		TimeLast:     times[valuesTotal-1],
 		BytesUsed:    uint16(8 * wordsTotal),
 	}
 
@@ -108,10 +108,32 @@ func EncodeBlock(values [][]int64, transformers []Transformer, writer io.Writer)
 	}
 
 	// ensure that 512 words are written
-
 	if _, err := writer.Write(make([]uint8, 8*(512-wordsTotal))); err != nil {
 		return 0, err
 	}
 
 	return valuesTotal, nil
+}
+
+func EncodeAll(writer io.Writer, times []int64, values [][]uint64) error {
+	// create a shallow copy of input arrays, so they are not modified
+	timesCopy := make([]int64, len(times))
+	valuesCopy := make([][]uint64, len(values))
+	for i, val := range values {
+		valuesCopy[i] = val
+	}
+
+	n := len(times)
+	for n > 0 {
+		c, err := EncodeBlock(writer, timesCopy, valuesCopy)
+		if err != nil {
+			return err
+		}
+		timesCopy = timesCopy[c:]
+		for i := range valuesCopy {
+			valuesCopy[i] = valuesCopy[i][c:]
+		}
+		n -= c
+	}
+	return nil
 }

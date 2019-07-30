@@ -17,19 +17,13 @@ const (
 	stateBody
 )
 
-type DecoderColumn struct {
-	Index       int
-	Transformer Transformer
-}
-
 type Decoder struct {
 	// Header contains the last BlockHeader read
 	Header BlockHeader
 	reader io.Reader
 	s      decoderState
-	// Columns contains a list of columns that should be decoded
-	// must be sorted by Index
-	Columns []DecoderColumn
+	// Columns contains a sorted list of columns that should be read
+	Columns []int
 }
 
 func NewDecoder() Decoder {
@@ -82,7 +76,7 @@ func (d *Decoder) DecodeHeader() (BlockHeader, error) {
 }
 
 // DecodeBlock decodes the next block from the reader
-func (d *Decoder) DecodeBlock() ([][]int64, error) {
+func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 	// check state
 	switch d.s {
 	case stateError:
@@ -95,7 +89,7 @@ func (d *Decoder) DecodeBlock() ([][]int64, error) {
 		}
 	}
 
-	values := make([][]int64, len(d.Columns))
+	values := make([][]uint64, len(d.Columns))
 
 	// number of words left in block
 	wordsLeft := 512 - 3
@@ -104,12 +98,12 @@ func (d *Decoder) DecodeBlock() ([][]int64, error) {
 
 	for i, col := range d.Columns {
 		// check if file even contains this column
-		if col.Index >= int(d.Header.NumColumns) {
+		if col >= int(d.Header.NumColumns) {
 			d.s = stateError
 			return nil, errors.New("not enough columns in block")
 		} // todo: if col.Index < colsRead { nil, errors.New("decoder columns are not in order") }
 		// skip columns that are not required
-		for colsRead < col.Index {
+		for colsRead < col {
 			// number of points read from this column
 			var pointsRead int
 			for pointsRead < int(d.Header.NumPoints) {
@@ -135,9 +129,10 @@ func (d *Decoder) DecodeBlock() ([][]int64, error) {
 			}
 			colsRead++
 		}
-		// values of this column before reverting transformation
-		valuesRaw := make([]uint64, d.Header.NumPoints)
 
+		values[i] = make([]uint64, d.Header.NumPoints)
+
+		// read points into output array
 		var pointsRead int
 		for pointsRead < int(d.Header.NumPoints) {
 			// check if there are words left in this block
@@ -160,21 +155,14 @@ func (d *Decoder) DecodeBlock() ([][]int64, error) {
 				return nil, err
 			}
 			// copy decoded raw values to buffer
-			copy(valuesRaw[pointsRead:], buf[:c])
+			copy(values[i][pointsRead:], buf[:c])
 			// add c to pointsRead after copy
 			pointsRead += c
-		}
-		// revert transformation and store in output slice
-		var err error
-		values[i], err = col.Transformer.Revert(valuesRaw)
-		if err != nil {
-			d.s = stateError
-			return nil, err
 		}
 		colsRead++
 	}
 
-	// discard rest of block
+	// discard rest of block so reader is at next header
 	err := d.skipWords(wordsLeft)
 	if err != nil {
 		d.s = stateError
