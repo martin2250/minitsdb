@@ -7,13 +7,27 @@ import (
 func testTransform(t *testing.T, transformer Transformer) {
 	input := []int64{6, 7, 8, 9, 10, 10, 11, 12, 14, 15, 16, 18, 20, 22, 24, 26, 28}
 
-	encoded, err := transformer.Apply(input)
+	// make a copy to ensure that the apply method does not modify it's input
+	inputCopy := make([]int64, len(input))
+	copy(inputCopy, input)
+
+	// apply transformation
+	encoded, err := transformer.Apply(inputCopy)
 
 	if err != nil {
 		t.Error(err)
 		return
 	}
 
+	// check input argument for modification
+	for i := range input {
+		if input[i] != inputCopy[i] {
+			t.Errorf("Apply function modified input slice \n%v\n%v", input, inputCopy)
+			return
+		}
+	}
+
+	// revert transformation
 	decoded, err := transformer.Revert(encoded)
 
 	if err != nil {
@@ -21,6 +35,7 @@ func testTransform(t *testing.T, transformer Transformer) {
 		return
 	}
 
+	// check input and output match
 	for i := range input {
 		if input[i] != decoded[i] {
 			t.Errorf("decoded array does not match original\n%v\n%v", input, decoded)

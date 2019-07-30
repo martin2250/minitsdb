@@ -1,62 +1,62 @@
 package storage
 
 import (
-	"bytes"
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"github.com/jwilder/encoding/simple8b"
 	"io"
 )
 
-type Encoder struct {
-	writer io.Writer
-	// Columns contains a list of columns that should be encoded
-	// must be sorted by Index
-	Transformers []Transformer
-}
-
 // EncodeBlock encodes as many values into a 4k block as it can possibly fit
-// returns the binary block and the number of data points contained within
-func EncodeBlock(values [][]int64) (bytes.Buffer, int, error) {
+// returns the number of data points written
+// if err == nil, exactly 4096 bytes were written to writer
+func EncodeBlock(values [][]int64, transformers []Transformer, writer io.Writer) (int, error) {
+	// check if counts match, else panic
+	if len(values) != len(transformers) {
+		panic("number of values and transformers don't match")
+	}
+
+	// tranform and encode all columns
 	encoded := make([][]uint64, len(values))
-	var buffer bytes.Buffer
-
 	for i := range values {
-		var err error
-
-		//encoded[i], err = simple8b.EncodeAll(doTransform(values[i]))
-		fmt.Println(i)
+		transformed, err := transformers[i].Apply(values[i])
 
 		if err != nil {
-			return buffer, 0, err
+			return 0, err
+		}
+
+		encoded[i], err = simple8b.EncodeAll(transformed)
+
+		if err != nil {
+			return 0, err
 		}
 	}
 
+	// try to fit as many values into 512 words as possible
+	// used to keep track of how many encoded words each column needs so all have the same number of values
 	columns := make([]struct {
 		words     int // number of words (confirmed to fit in last loop)
 		wordsNext int // number of words (tested in current loop iteration)
 		values    int // number of values contained
 	}, len(values))
 
-	valuesTotal := 1
-	wordsTotal := 0
+	valuesTotal := 0
+	wordsTotal := 3 // 3 words occupied by header
 
-	// maximum number of words in a block (header uses 3 words)
-	const wordsMax = 4096/8 - 3
-	valuesMax := len(values[0])
-
-	// go over possible numbers of values to store in block
-	// and keep track of number of words required for each column
+	// increase numbers of values until total number of words exceeds block size
 	for {
+		// increase valuesTotal and check if this number of values still fits
+		valuesTotal++
+		// total number of words after this round, checked to be smaller
+		// than wordsMax at the end of the loop iteration
 		wordsTotalNext := wordsTotal
-		// check if column needs one more word to store valuesTotal
+		// give every column with less values one more word
 		for i := range columns {
 			if columns[i].values < valuesTotal {
+				// count number of values in the next word
 				count, err := simple8b.Count(encoded[i][columns[i].words])
 
 				if err != nil {
-					return buffer, 0, err
+					return 0, err
 				}
 
 				wordsTotalNext++
@@ -65,26 +65,26 @@ func EncodeBlock(values [][]int64) (bytes.Buffer, int, error) {
 			}
 		}
 
-		// valuesTotal exceeds block capacity, do not update columns.words lower valuesTotal again
-		if wordsTotalNext > wordsMax {
+		// valuesTotal exceeds block capacity
+		// do not update columns.words
+		// use last valid number of values
+		if wordsTotalNext > 512 {
 			valuesTotal--
 			break
 		}
 
-		// valuesTotal fits inside block, update columns.words and wordsTotal
-		wordsTotal = wordsTotalNext
+		// this number of words still fits into the block
+		// update number of words allocated to each column
 		for i := range columns {
 			columns[i].words = columns[i].wordsNext
 		}
+		wordsTotal = wordsTotalNext
 
-		if valuesTotal == valuesMax {
+		// no more values left to store
+		if valuesTotal == len(values[0]) {
 			break
 		}
-
-		valuesTotal++
 	}
-
-	bytesTotal := 8 * (wordsTotal + 3)
 
 	header := BlockHeader{
 		BlockVersion: 1,
@@ -92,32 +92,26 @@ func EncodeBlock(values [][]int64) (bytes.Buffer, int, error) {
 		NumColumns:   uint8(len(values)),
 		TimeFirst:    values[0][0],
 		TimeLast:     values[0][valuesTotal-1],
-		BytesUsed:    uint16(bytesTotal),
+		BytesUsed:    uint16(8 * wordsTotal),
 	}
 
-	buffer.Grow(4096)
-
 	// write header
-	if err := binary.Write(&buffer, binary.LittleEndian, header); err != nil {
-		return buffer, 0, err
+	if err := binary.Write(writer, binary.LittleEndian, header); err != nil {
+		return 0, err
 	}
 
 	// write columns
 	for i := range columns {
-		if err := binary.Write(&buffer, binary.LittleEndian, encoded[i][:columns[i].words]); err != nil {
-			return buffer, 0, err
+		if err := binary.Write(writer, binary.LittleEndian, encoded[i][:columns[i].words]); err != nil {
+			return 0, err
 		}
 	}
 
-	// check if calculated length matches buffer length (should never fail)
-	if buffer.Len() != bytesTotal {
-		return buffer, 0, errors.New("buffer length does not match calculation")
+	// ensure that 512 words are written
+
+	if _, err := writer.Write(make([]uint8, 8*(512-wordsTotal))); err != nil {
+		return 0, err
 	}
 
-	// make sure buffer length is 4096 bytes
-	if err := binary.Write(&buffer, binary.LittleEndian, make([]uint8, 4096-bytesTotal)); err != nil {
-		return buffer, 0, err
-	}
-
-	return buffer, valuesTotal, nil
+	return valuesTotal, nil
 }
