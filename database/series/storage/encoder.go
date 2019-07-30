@@ -13,22 +13,17 @@ import (
 // times is only used to fill the block header TimeFirst and TimeLast, must also be stored in values (in transformed form)
 func EncodeBlock(writer io.Writer, times []int64, values [][]uint64) (int, error) {
 	valuesAvailable := len(times)
-	// encode all columns with simple8b
 	encoded := make([][]uint64, len(values))
+
+	//valuesCopy := make([][]uint64, len(values)) todo: remove this
 	for i, val := range values {
 		if len(val) != valuesAvailable {
 			panic("input slices have different lengths")
 		}
-
-		valCopy := make([]uint64, valuesAvailable)
-		copy(valCopy, val)
-
-		var err error
-		encoded[i], err = simple8b.EncodeAll(valCopy)
-
-		if err != nil {
-			return 0, err
-		}
+		encoded[i] = make([]uint64, 0)
+		//
+		//valuesCopy[i] = make([]uint64, valuesAvailable)
+		//copy(valuesCopy[i], val)
 	}
 
 	// try to fit as many values into 512 words as possible
@@ -53,11 +48,13 @@ func EncodeBlock(writer io.Writer, times []int64, values [][]uint64) (int, error
 		for i := range columns {
 			if columns[i].values < valuesTotal {
 				// count number of values in the next word
-				count, err := simple8b.Count(encoded[i][columns[i].words])
+				encodedWord, count, err := simple8b.Encode(values[i][columns[i].values:])
 
 				if err != nil {
 					return 0, err
 				}
+
+				encoded[i] = append(encoded[i], encodedWord)
 
 				wordsTotalNext++
 				columns[i].wordsNext++
