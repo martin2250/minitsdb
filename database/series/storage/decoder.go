@@ -101,7 +101,10 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 		if col >= int(d.Header.NumColumns) {
 			d.s = stateError
 			return nil, errors.New("not enough columns in block")
-		} // todo: if col.Index < colsRead { nil, errors.New("decoder columns are not in order") }
+		}
+		if col < colsRead {
+			return nil, errors.New("decoder columns are not in order")
+		}
 		// skip columns that are not required
 		for colsRead < col {
 			// number of points read from this column
