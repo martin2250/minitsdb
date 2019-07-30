@@ -233,6 +233,7 @@ func NewBucket(s *Series, res int64) (Bucket, error) {
 	if err := b.checkTimeLast(); err != nil {
 		return Bucket{}, err
 	}
+	// todo: check that total number of columns is smaller or equal to 256
 
 	return b, nil
 }

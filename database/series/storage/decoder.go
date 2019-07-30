@@ -17,6 +17,11 @@ const (
 	stateBody
 )
 
+type DecoderColumn struct {
+	Index       int
+	Transformer Transformer
+}
+
 type Decoder struct {
 	// Header contains the last BlockHeader read
 	Header BlockHeader
@@ -24,10 +29,7 @@ type Decoder struct {
 	s      decoderState
 	// Columns contains a list of columns that should be decoded
 	// must be sorted by Index
-	Columns []struct {
-		Index       int
-		Transformer Transformer
-	}
+	Columns []DecoderColumn
 }
 
 func NewDecoder() Decoder {
@@ -105,7 +107,7 @@ func (d *Decoder) DecodeBlock() ([][]int64, error) {
 		if col.Index >= int(d.Header.NumColumns) {
 			d.s = stateError
 			return nil, errors.New("not enough columns in block")
-		}
+		} // todo: if col.Index < colsRead { nil, errors.New("decoder columns are not in order") }
 		// skip columns that are not required
 		for colsRead < col.Index {
 			// number of points read from this column
@@ -157,9 +159,10 @@ func (d *Decoder) DecodeBlock() ([][]int64, error) {
 				d.s = stateError
 				return nil, err
 			}
-			pointsRead += c
 			// copy decoded raw values to buffer
 			copy(valuesRaw[pointsRead:], buf[:c])
+			// add c to pointsRead after copy
+			pointsRead += c
 		}
 		// revert transformation and store in output slice
 		var err error
@@ -168,6 +171,7 @@ func (d *Decoder) DecodeBlock() ([][]int64, error) {
 			d.s = stateError
 			return nil, err
 		}
+		colsRead++
 	}
 
 	// discard rest of block

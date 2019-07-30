@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -8,13 +9,32 @@ import (
 )
 
 func runEncodeTest(values [][]int64) (int, error) {
-	buffer, _, err := EncodeBlock(values)
+	t := make([]Transformer, len(values))
+	for i := range t {
+		t[i] = DiffTransformer{N: 1}
+	}
+
+	var b bytes.Buffer
+
+	n, err := EncodeBlock(values, t, &b)
 
 	if err != nil {
 		return 0, err
 	}
 
-	header, decoded, err := DecodeBlock(&buffer, nil)
+	if b.Len() != 4096 {
+		return 0, fmt.Errorf("did not write %d bytes, not 4096 bytes", b.Len())
+	}
+
+	d := NewDecoder()
+	d.Columns = make([]DecoderColumn, len(t))
+	for i, x := range t {
+		d.Columns[i].Transformer = x
+		d.Columns[i].Index = i
+	}
+	d.SetReader(&b)
+
+	decoded, err := d.DecodeBlock()
 
 	if err != nil {
 		return 0, err
@@ -23,12 +43,12 @@ func runEncodeTest(values [][]int64) (int, error) {
 	for i := range decoded {
 		for j := range decoded[i] {
 			if values[i][j] != decoded[i][j] {
-				return 0, fmt.Errorf("Decoded value incorrect %d (expected %d) at pos (%d, %d)", decoded[i][j], values[i][j], i, j)
+				return 0, fmt.Errorf("decoded value incorrect %d (expected %d) at pos (%d, %d)", decoded[i][j], values[i][j], i, j)
 			}
 		}
 	}
 
-	return int(header.NumPoints), nil
+	return n, nil
 }
 
 func BenchmarkEncoder(b *testing.B) {
@@ -37,19 +57,23 @@ func BenchmarkEncoder(b *testing.B) {
 	values := make([][]int64, 8)
 
 	for i := range values {
-		values[i] = make([]int64, 200)
-
+		values[i] = make([]int64, 500)
+		last := rand.Int63n(600)
 		for j := range values[i] {
-			values[i][j] = rand.Int63n(2525323)
+			last = last + rand.Int63n(50) - 25
+			values[i][j] = last
 		}
 	}
 
 	for n := 0; n < b.N; n++ {
-		_, err := runEncodeTest(values)
-
-		if err != nil {
-			b.Error(err)
-			return
+		j := 0
+		for j < len(values[0]) {
+			c, err := runEncodeTest(values[j:])
+			if err != nil {
+				b.Error(err)
+				return
+			}
+			j += c
 		}
 	}
 }
