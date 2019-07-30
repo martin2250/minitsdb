@@ -1,4 +1,4 @@
-package encoder
+package storage
 
 func applyZigzag(i int64) uint64 {
 	return uint64((i >> 63) ^ (i << 1))

@@ -7,7 +7,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/martin2250/minitsdb/database/series/encoder"
+	"github.com/martin2250/minitsdb/database/series/storage"
 
 	"github.com/martin2250/minitsdb/ingest"
 	"github.com/martin2250/minitsdb/util"
@@ -253,7 +253,7 @@ func (s *Series) checkFirstBucket() error {
 	}
 
 	// read last block
-	header, values, err := encoder.ReadBlock(&buf)
+	header, values, err := storage.ReadBlock(&buf)
 
 	if err != nil {
 		return err

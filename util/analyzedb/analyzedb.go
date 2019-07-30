@@ -5,7 +5,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/martin2250/minitsdb/database/series/encoder"
+	"github.com/martin2250/minitsdb/database/series/storage"
 )
 
 // ErrColumnMismatch indicates that blocks in a file have inconsistent numbers of columns
@@ -24,7 +24,7 @@ type AnalyzeResult struct {
 
 // Analyze reads all blocks from a file, decodes the headers and calculates statistics
 func Analyze(r io.ReadSeeker) (result AnalyzeResult, err error) {
-	header, err := encoder.DecodeHeader(r)
+	header, err := storage.DecodeHeader(r)
 
 	if err != nil {
 		if err == io.EOF {
@@ -56,7 +56,7 @@ func Analyze(r io.ReadSeeker) (result AnalyzeResult, err error) {
 			return
 		}
 
-		header, err = encoder.DecodeHeader(r)
+		header, err = storage.DecodeHeader(r)
 
 		if err != nil {
 			if err == io.EOF {

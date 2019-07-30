@@ -1,4 +1,4 @@
-package encoder
+package storage
 
 import (
 	"fmt"

@@ -13,7 +13,7 @@ import (
 	"github.com/martin2250/minitsdb/util"
 
 	"github.com/golang/glog"
-	"github.com/martin2250/minitsdb/database/series/encoder"
+	"github.com/martin2250/minitsdb/database/series/storage"
 )
 
 // DataFile represents a file in the bucket's database directory
@@ -206,7 +206,7 @@ func (b *Bucket) checkTimeLast() error {
 	}
 
 	// read last block
-	header, err := encoder.DecodeHeader(&buf)
+	header, err := storage.DecodeHeader(&buf)
 
 	if err != nil {
 		return err
@@ -259,7 +259,7 @@ func (b *Bucket) WriteBlock(values [][]int64) (int, error) {
 		}
 	}
 
-	block, count, err := encoder.EncodeBlock(values)
+	block, count, err := storage.EncodeBlock(values)
 
 	if err != nil {
 		return 0, err

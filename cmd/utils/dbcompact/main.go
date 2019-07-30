@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/martin2250/minitsdb/database/series/encoder"
+	"github.com/martin2250/minitsdb/database/series/storage"
 )
 
 var opts struct {
@@ -40,7 +40,7 @@ func main() {
 	check(err)
 	defer fileOutput.Close()
 
-	_, values, err := encoder.ReadBlock(fileInput)
+	_, values, err := storage.ReadBlock(fileInput)
 
 	if err != nil {
 		log.Fatalf("First Block damaged: %v\n", err)
@@ -54,7 +54,7 @@ func main() {
 	for available || len(values[0]) > 0 {
 		if available && len(values[0]) < opts.sizeBuffer {
 			blockCounterInput++
-			header, valuesNew, err := encoder.ReadBlock(fileInput)
+			header, valuesNew, err := storage.ReadBlock(fileInput)
 
 			if err == io.EOF {
 				available = false
@@ -78,7 +78,7 @@ func main() {
 			continue
 		}
 
-		buffer, count, err := encoder.EncodeBlock(values)
+		buffer, count, err := storage.EncodeBlock(values)
 
 		if err != nil {
 			log.Fatalf("Error encoding block %v\n", err)

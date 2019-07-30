@@ -1,4 +1,4 @@
-package encoder
+package storage
 
 // a transformer encodes a list of signed integer values to unsigned values which can be fed into simple8b
 type Transformer interface {

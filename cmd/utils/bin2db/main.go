@@ -9,7 +9,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/martin2250/minitsdb/database/series/encoder"
+	"github.com/martin2250/minitsdb/database/series/storage"
 )
 
 var opts struct {
@@ -145,7 +145,7 @@ func main() {
 		}
 
 		for (flush && len(values[0]) > 0) || len(values[0]) >= opts.sizeBuffer {
-			buffer, count, err := encoder.EncodeBlock(values)
+			buffer, count, err := storage.EncodeBlock(values)
 
 			if count == 1 {
 				log.Printf("vals: %v", values)

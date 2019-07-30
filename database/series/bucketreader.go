@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/martin2250/minitsdb/database/series/encoder"
+	"github.com/martin2250/minitsdb/database/series/storage"
 	"github.com/martin2250/minitsdb/util"
 )
 
@@ -40,7 +40,7 @@ func (q *BucketReader) ReadNextBlock() ([][]int64, error) {
 	}
 
 	// decode block
-	header, values, err := encoder.ReadBlock(q.currentFile)
+	header, values, err := storage.ReadBlock(q.currentFile)
 
 	// file at end
 	if err == io.EOF {
@@ -157,7 +157,7 @@ func (b Bucket) CreateReader(params BucketReaderParameters) (r BucketReader, err
 			}
 
 			// decode header
-			header, err := encoder.DecodeHeader(r.currentFile)
+			header, err := storage.DecodeHeader(r.currentFile)
 
 			if err != nil {
 				// end of file = check next file

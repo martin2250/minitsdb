@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/martin2250/minitsdb/database/series/encoder"
+	"github.com/martin2250/minitsdb/database/series/storage"
 )
 
 func query(writer http.ResponseWriter, from int64, to int64) error {
@@ -32,7 +32,7 @@ func query(writer http.ResponseWriter, from int64, to int64) error {
 
 		r := bytes.NewReader(buffer)
 
-		header, err := encoder.DecodeHeader(r)
+		header, err := storage.DecodeHeader(r)
 
 		if err != nil {
 			return err
@@ -45,8 +45,8 @@ func query(writer http.ResponseWriter, from int64, to int64) error {
 			break
 		}
 
-		header, values, err := encoder.DecodeBlock(r, &header)
-		// _, _, err = encoder.DecodeBlock(r)
+		header, values, err := storage.DecodeBlock(r, &header)
+		// _, _, err = storage.DecodeBlock(r)
 
 		if err != nil {
 			return err
