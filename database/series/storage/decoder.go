@@ -62,15 +62,16 @@ func (d *Decoder) DecodeHeader() (BlockHeader, error) {
 			return BlockHeader{}, err
 		}
 	}
-
+	var header blockHeaderRaw
 	// read header
-	err := binary.Read(d.reader, binary.LittleEndian, &d.Header)
+	err := binary.Read(d.reader, binary.LittleEndian, &header)
 
 	if err != nil {
 		d.s = stateError
 		return BlockHeader{}, err
 	}
 
+	d.Header = header.Nice()
 	d.s = stateBody
 	return d.Header, err
 }
@@ -98,7 +99,7 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 
 	for i, col := range d.Columns {
 		// check if file even contains this column
-		if col >= int(d.Header.NumColumns) {
+		if col >= d.Header.NumColumns {
 			d.s = stateError
 			return nil, errors.New("not enough columns in block")
 		}
@@ -109,7 +110,7 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 		for colsRead < col {
 			// number of points read from this column
 			var pointsRead int
-			for pointsRead < int(d.Header.NumPoints) {
+			for pointsRead < d.Header.NumPoints {
 				// check if there are words left in this block
 				if wordsLeft == 0 {
 					d.s = stateError

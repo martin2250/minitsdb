@@ -1,6 +1,7 @@
 package series
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -15,13 +16,16 @@ import (
 
 // Column holds the json structure that describes a column in a series
 type Column struct {
-	Tags     map[string]string
-	Decimals int
+	Tags        map[string]string
+	Decimals    int
+	Transformer storage.Transformer
 }
 
 // Series describes a time series, id'd by a name and tags
 type Series struct {
-	Values        [][]int64
+	Time   []int64
+	Values [][]int64
+
 	OverwriteLast bool // data buffer contains last block on disk, overwrite
 	Path          string
 	Columns       []Column
@@ -166,33 +170,34 @@ func OpenSeries(seriespath string) (Series, error) {
 		Path: seriespath,
 	}
 
-	// create buckets
-	timeStep := int64(1)
-
-	for i, bc := range conf.Buckets {
-		timeStep *= int64(bc.Factor)
-
-		s.Buckets[i], err = NewBucket(&s, timeStep)
-
-		if err != nil {
-			return Series{}, err
-		}
-
-		s.Buckets[i].First = (i == 0)
-	}
-
 	// create columns
 	for _, colconf := range conf.Columns {
+		// create transformer
+		var transformer storage.Transformer
+		if colconf.Transformer != "" {
+			var arg int
+			if _, err := fmt.Sscanf(colconf.Transformer, "D%d", &arg); err != nil {
+				transformer = storage.DiffTransformer{N: arg}
+			} else {
+				return Series{}, fmt.Errorf("%s matches no known transformers", colconf.Transformer)
+			}
+		} else {
+			// default to differentiating once
+			transformer = storage.DiffTransformer{N: 1}
+		}
+
 		if colconf.Duplicate == nil {
 			s.Columns = append(s.Columns, Column{
-				Decimals: colconf.Decimals,
-				Tags:     colconf.Tags,
+				Decimals:    colconf.Decimals,
+				Tags:        colconf.Tags,
+				Transformer: transformer,
 			})
 		} else {
 			for _, tagset := range colconf.Duplicate {
 				col := Column{
-					Decimals: colconf.Decimals,
-					Tags:     make(map[string]string),
+					Decimals:    colconf.Decimals,
+					Tags:        make(map[string]string),
+					Transformer: transformer,
 				}
 
 				for tag, value := range colconf.Tags {
@@ -214,24 +219,47 @@ func OpenSeries(seriespath string) (Series, error) {
 				continue
 			}
 			if util.IsSubset(a.Tags, b.Tags) {
-				return Series{}, fmt.Errorf("Columns %v and %v are indistinguishable", a.Tags, b.Tags)
+				return Series{}, fmt.Errorf("columns %v and %v are indistinguishable", a.Tags, b.Tags)
 			}
 		}
 	}
 
-	err = s.checkFirstBucket()
+	// create buckets
+	timeStep := int64(1)
+
+	for i, bc := range conf.Buckets {
+		timeStep *= int64(bc.Factor)
+
+		s.Buckets[i] = Bucket{
+			TimeLast:       math.MinInt64,
+			TimeResolution: timeStep,
+			PointsPerFile:  conf.PointsFile,
+			First:          i == 0,
+		}
+
+		err = s.Buckets[i].Init()
+
+		if err != nil {
+			return Series{}, err
+		}
+	}
+
+	// create top level value array
+	s.Values = make([][]int64, len(s.Columns))
+
+	// if the last block of the first bucket is not full, read it's values and set the overwrite last flag
+	valuesRead, err := s.checkFirstBucket()
 
 	if err != nil {
 		return Series{}, err
 	}
 
-	if s.Values == nil {
-		// create value buffers, 1 extra column for time
-		s.Values = make([][]int64, 1+len(s.Columns))
-
+	// if no values were read, initialize value and time buffers manually
+	if !valuesRead {
 		for i := range s.Values {
 			s.Values[i] = make([]int64, 0)
 		}
+		s.Time = make([]int64, 0)
 	}
 
 	return s, nil
@@ -239,38 +267,71 @@ func OpenSeries(seriespath string) (Series, error) {
 
 // checkFirstBucket checks the last block in the first bucket for free space according to ReuseMax
 // errors are to be treated as fatal
-func (s *Series) checkFirstBucket() error {
+func (s *Series) checkFirstBucket() (bool, error) {
 	b := &s.Buckets[0]
 
+	// read last block from file
 	buf, err := b.getLastBlock()
 
 	if err == io.EOF {
-		return nil
+		return false, nil
 	}
 
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	// read last block
-	header, values, err := storage.ReadBlock(&buf)
+	// decode header
+	d := storage.NewDecoder()
+	d.SetReader(&buf)
+
+	// read last block header
+	header, err := d.DecodeHeader()
 
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// check if database file matches series
-	if int(header.NumColumns) != (len(s.Columns) + 1) {
-		return errors.New("database file does not match series")
+	if header.NumColumns != (len(s.Columns) + 1) {
+		return false, errors.New("database file does not match series")
 	}
 
-	// reuse last block
-	if int(header.BytesUsed) < s.ReuseMax {
-		s.OverwriteLast = true
-		s.Values = values
+	// check if last block can be reused
+	if header.BytesUsed > s.ReuseMax {
+		return false, nil
 	}
 
-	return nil
+	// fill decoder columns
+	d.Columns = make([]int, header.NumColumns)
+	for i := range d.Columns {
+		d.Columns[i] = i
+	}
+
+	// read values from last block
+	values, err := d.DecodeBlock()
+
+	if err != nil {
+		return false, err
+	}
+
+	// decode time and values
+	s.Time, err = storage.DiffTransformer{N: 2}.Revert(values[0])
+
+	if err != nil {
+		return false, err
+	}
+
+	for i := range values {
+		s.Values[i], err = s.Columns[i].Transformer.Revert(values[i+1])
+
+		if err != nil {
+			return false, err
+		}
+	}
+
+	s.OverwriteLast = true
+	return true, nil
 }
 
 func (s *Series) CheckFlush() bool {
@@ -283,20 +344,88 @@ func (s *Series) CheckFlush() bool {
 	return false
 }
 
-func (s *Series) Flush() error {
-	count, err := s.Buckets[0].WriteBlock(s.Values)
+// Discard the first n values from RAM
+// copy arrays to allow GC to work
+func (s *Series) Discard(n int) {
+	if n > len(s.Time) {
+		n = len(s.Time)
+	}
+	s.Time = util.Copy1DInt64(s.Time[n:])
+	for i := range s.Values {
+		s.Values[i] = util.Copy1DInt64(s.Values[i][n:])
+	}
+}
 
+// SaveDiscard saves n values to a recovery file and then calls discard
+func (s *Series) SaveDiscard(n int) {
+	// todo: store raw values in recovery file
+	s.Discard(n)
+}
+
+// todo: make this only flush after
+// todo: a) a configurable amount of time after the last flush
+// todo: b) or a configurable maximum amount of values is in the buffer
+// Flush does not return an error, errors are handled by the function itself
+func (s *Series) Flush() {
+	overwrite := s.OverwriteLast
+	s.OverwriteLast = false
+	// don't flush if empty
+	if len(s.Time) == 0 {
+		return
+	}
+
+	b := &s.Buckets[0]
+
+	// check file boundaries
+	count, fileTime := b.GetStorageTime(s.Time)
+
+	// transform values
+	var err error
+	transformed := make([][]uint64, len(s.Values)+1)
+
+	transformed[0], err = storage.TimeTransformer.Apply(s.Time[:count])
 	if err != nil {
-		return err
+		// todo: log this properly
+		s.SaveDiscard(count)
+		fmt.Printf("ERROR while transforming time for series %v\n", s.Tags)
+		return
 	}
 
 	for i := range s.Values {
-		// copy to new buffer to allow GC to work
-		// todo: make this not happen every time
-		newbuffer := make([]int64, len(s.Values[i])-count)
-		copy(newbuffer, s.Values[i][count:])
-		s.Values[i] = newbuffer
+		transformed[i+1], err = s.Columns[i].Transformer.Apply(s.Values[i][:count])
+		if err != nil {
+			// todo: log this properly
+			s.SaveDiscard(count)
+			fmt.Printf("ERROR while transforming values for series %v\n", s.Tags)
+			return
+		}
 	}
 
-	return nil
+	// encode values
+	var buffer bytes.Buffer
+	header, err := storage.EncodeBlock(&buffer, s.Time[:count], transformed)
+
+	if err != nil {
+		// todo: log this properly
+		s.SaveDiscard(count)
+		fmt.Printf("ERROR while encoding values for series %v\n", s.Tags)
+		return
+	}
+
+	// write transformed values to file
+	err = s.Buckets[0].WriteBlock(fileTime, buffer.Bytes(), overwrite)
+
+	if err != nil {
+		// todo: log this properly
+		s.SaveDiscard(header.NumPoints)
+		fmt.Printf("ERROR while encoding values for series %v\n", s.Tags)
+		return
+	}
+
+	// don't discard points if we can reuse the block
+	if header.NumPoints == count && header.BytesUsed < s.ReuseMax {
+		s.OverwriteLast = true
+	} else {
+		s.Discard(header.NumPoints)
+	}
 }

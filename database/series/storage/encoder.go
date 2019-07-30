@@ -11,7 +11,7 @@ import (
 // if err == nil, exactly 4096 bytes were written to writer
 // values must have 255 or fewer entries
 // times is only used to fill the block header TimeFirst and TimeLast, must also be stored in values (in transformed form)
-func EncodeBlock(writer io.Writer, times []int64, values [][]uint64) (int, error) {
+func EncodeBlock(writer io.Writer, times []int64, values [][]uint64) (BlockHeader, error) {
 	valuesAvailable := len(times)
 	encoded := make([][]uint64, len(values))
 
@@ -20,7 +20,7 @@ func EncodeBlock(writer io.Writer, times []int64, values [][]uint64) (int, error
 			panic("input slices have different lengths")
 		}
 		// pre-allocate some words to make appends faster
-		encoded[i] = make([]uint64, 64)[:0]
+		encoded[i] = make([]uint64, 0, 64)
 	}
 
 	// try to fit as many values into 512 words as possible
@@ -48,7 +48,7 @@ func EncodeBlock(writer io.Writer, times []int64, values [][]uint64) (int, error
 				encodedWord, count, err := simple8b.Encode(values[i][columns[i].values:])
 
 				if err != nil {
-					return 0, err
+					return BlockHeader{}, err
 				}
 
 				encoded[i] = append(encoded[i], encodedWord)
@@ -80,7 +80,7 @@ func EncodeBlock(writer io.Writer, times []int64, values [][]uint64) (int, error
 		}
 	}
 
-	header := BlockHeader{
+	header := blockHeaderRaw{
 		BlockVersion: 1,
 		NumPoints:    uint32(valuesTotal),
 		NumColumns:   uint8(len(values)),
@@ -91,22 +91,22 @@ func EncodeBlock(writer io.Writer, times []int64, values [][]uint64) (int, error
 
 	// write header
 	if err := binary.Write(writer, binary.LittleEndian, header); err != nil {
-		return 0, err
+		return BlockHeader{}, err
 	}
 
 	// write columns
 	for i := range columns {
 		if err := binary.Write(writer, binary.LittleEndian, encoded[i][:columns[i].words]); err != nil {
-			return 0, err
+			return BlockHeader{}, err
 		}
 	}
 
 	// ensure that 512 words are written
 	if _, err := writer.Write(make([]uint8, 8*(512-wordsTotal))); err != nil {
-		return 0, err
+		return BlockHeader{}, err
 	}
 
-	return valuesTotal, nil
+	return header.Nice(), nil
 }
 
 func EncodeAll(writer io.Writer, times []int64, values [][]uint64) error {
@@ -119,15 +119,15 @@ func EncodeAll(writer io.Writer, times []int64, values [][]uint64) error {
 
 	n := len(times)
 	for n > 0 {
-		c, err := EncodeBlock(writer, timesCopy, valuesCopy)
+		header, err := EncodeBlock(writer, timesCopy, valuesCopy)
 		if err != nil {
 			return err
 		}
-		timesCopy = timesCopy[c:]
+		timesCopy = timesCopy[header.NumPoints:]
 		for i := range valuesCopy {
-			valuesCopy[i] = valuesCopy[i][c:]
+			valuesCopy[i] = valuesCopy[i][header.NumPoints:]
 		}
-		n -= c
+		n -= header.NumPoints
 	}
 	return nil
 }

@@ -16,9 +16,10 @@ type YamlBucketConfig struct {
 
 // YamlColumnConfig describes a column group (duplicate not applied yet) in SeriesConfig
 type YamlColumnConfig struct {
-	Decimals  int
-	Tags      map[string]string
-	Duplicate []map[string]string
+	Decimals    int
+	Tags        map[string]string
+	Duplicate   []map[string]string
+	Transformer string
 }
 
 // YamlSeriesConfig describes the YAML file for a series
@@ -26,6 +27,7 @@ type YamlSeriesConfig struct {
 	FlushDelay time.Duration
 	Buffer     int
 	ReuseMax   int
+	PointsFile int
 
 	Tags map[string]string
 
@@ -64,15 +66,19 @@ func LoadSeriesYamlConfig(seriesPath string) (YamlSeriesConfig, error) {
 // Check checks config for errors
 func (c *YamlSeriesConfig) Check() error {
 	if c.FlushDelay < 10*time.Second {
-		return errors.New("flush delay must be greater than 10s")
+		return errors.New("flush delay must be greater than or equal to 10s")
 	}
 
 	if c.Buffer < 50 {
-		return errors.New("buffer size must be greater than 50 points")
+		return errors.New("buffer size must be greater than 50 or equal to points")
 	}
 
 	if c.ReuseMax < 0 || c.ReuseMax > 4096 {
 		return errors.New("reusemax must be between 0 and 4096 bytes")
+	}
+
+	if c.PointsFile < 1000 {
+		return errors.New("pointsfile must be between greater than or equal to 1000")
 	}
 
 	if _, ok := c.Tags["name"]; !ok {

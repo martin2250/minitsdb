@@ -2,6 +2,7 @@ package series
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -25,8 +26,6 @@ type DataFile struct {
 // Bucket is a downsampling step
 // Bucket only describes data stored permanently in files, not the data buffered in RAM
 type Bucket struct {
-	// the series this bucket belongs to
-	series *Series
 	// timestamp of last value stored in file (indicates when to downsample data)
 	TimeLast int64
 	// time between points
@@ -205,8 +204,11 @@ func (b *Bucket) checkTimeLast() error {
 		return err
 	}
 
-	// read last block
-	header, err := storage.DecodeHeader(&buf)
+	d := storage.NewDecoder()
+	d.SetReader(&buf)
+
+	// read last block header
+	header, err := d.DecodeHeader()
 
 	if err != nil {
 		return err
@@ -217,102 +219,102 @@ func (b *Bucket) checkTimeLast() error {
 	return nil
 }
 
-// NewBucket creates a bucket and loads relevant data from disk
-// todo: read PointsPerFile from config
-func NewBucket(s *Series, res int64) (Bucket, error) {
-	b := Bucket{
-		series:         s,
-		TimeResolution: res,
-		PointsPerFile:  3600 * 24,
-	}
-
+// Init loads relevant data from disk
+func (b *Bucket) Init() error {
 	if err := b.loadFiles(); err != nil {
-		return Bucket{}, err
+		return err
 	}
 
 	if err := b.checkTimeLast(); err != nil {
-		return Bucket{}, err
+		return err
 	}
 	// todo: check that total number of columns is smaller or equal to 256
 
-	return b, nil
+	return nil
 }
 
-// WriteBlock returns the number of values written
-func (b *Bucket) WriteBlock(values [][]int64) (int, error) {
-	if len(values[0]) == 0 {
-		return 0, nil
-	}
-	// check that all values belong to same file
-	indexEnd := -1
-	timeFileStart := util.RoundDown(values[0][0], int64(b.PointsPerFile))
+// GetStorageTime checks how many points fit into the same file as the first point
+// returns the number of points that fit and the time at which the file starts
+func (b Bucket) GetStorageTime(time []int64) (int, int64) {
+	count := len(time)
+	timeFileStart := util.RoundDown(time[0], int64(b.PointsPerFile)*b.TimeResolution)
 
-	for i, t := range values[0] {
-		if timeFileStart != util.RoundDown(t, int64(b.PointsPerFile)) {
-			indexEnd = i
+	for i, t := range time {
+		if timeFileStart != util.RoundDown(t, int64(b.PointsPerFile)*b.TimeResolution) {
+			count = i
 			break
 		}
 	}
 
-	if indexEnd != -1 {
-		for i := range values {
-			values[i] = values[i][:indexEnd]
-		}
+	return count, timeFileStart
+}
+
+func (b *Bucket) WriteBlock(fileTime int64, buffer []byte, overwrite bool) error {
+	if len(buffer)%4096 != 0 {
+		return errors.New("buffer length not divisible by 4096")
 	}
-
-	block, count, err := storage.EncodeBlock(values)
-
-	if err != nil {
-		return 0, err
+	if fileTime%(int64(b.PointsPerFile)*b.TimeResolution) != 0 {
+		return errors.New("file time invalid")
 	}
 
 	// create new data file if not indexed yet
-	dataFile, ok := b.DataFiles[timeFileStart]
+	_, exists := b.DataFiles[fileTime]
 
-	if !ok {
-		dataFile = &DataFile{
+	if !exists {
+		b.DataFiles[fileTime] = &DataFile{
 			Blocks: 0,
-			Path:   b.GetFileName(timeFileStart),
+			Path:   b.GetFileName(fileTime),
 		}
-		b.DataFiles[timeFileStart] = dataFile
-	} else {
-		// check file for corruption
-		info, err := os.Stat(dataFile.Path)
+	}
+
+	stat, err := os.Stat(b.DataFiles[fileTime].Path)
+
+	// if this file name exists, check the file before continuing
+	if err == nil {
+		if stat.IsDir() {
+			// todo: log
+			fmt.Printf("ERROR: data file is directory: %s", b.DataFiles[fileTime].Path)
+			return errors.New("data file is directory")
+		}
+		if stat.Size()%4096 != 0 {
+			fmt.Printf("ERROR: data file size %d not multiple of 4096", stat.Size())
+			return fmt.Errorf("data file size %d not multiple of 4096", stat.Size())
+		}
+	} else if !os.IsNotExist(err) {
+		fmt.Printf("ERROR: unknown error while statting %s", err.Error())
+		return err
+	}
+
+	// open file for writing
+	file, err := os.OpenFile(b.DataFiles[fileTime].Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+
+	if err != nil {
+		fmt.Printf("error while opening %s for writing", err.Error())
+		return err
+	}
+
+	defer file.Close()
+
+	// seek last block if it should be overwritten
+	if overwrite && stat.Size() > 0 {
+		_, err := file.Seek(-4096, io.SeekEnd)
 
 		if err != nil {
-			return 0, err
-		}
-
-		if info.Size()%4096 != 0 {
-			return 0, fmt.Errorf("file size %d not multiple of 4096", info.Size())
+			fmt.Printf("error while seeking start of last block of %s: %s", b.DataFiles[fileTime].Path, err.Error())
+			return err
 		}
 	}
 
-	// open or create file
-	//var file *os.File
-	file, err := os.OpenFile(dataFile.Path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	//if ok {
-	//} else {
-	//	file, err = os.Create(dataFile.Path)
-	//}
+	// write block to file
+	n, err := file.Write(buffer)
 
 	if err != nil {
-		return 0, err
+		if n%4096 != 0 {
+			fmt.Printf("ERROR: wrote incomplete block to %s (%d bytes) because of %s", b.DataFiles[fileTime].Path, n, err.Error())
+		}
+		return err
 	}
 
-	n, err := block.WriteTo(file)
-
-	if err != nil {
-		return 0, err
-	}
-
-	if n != 4096 {
-		return 0, fmt.Errorf("failed to write full 4096 bytes, only wrote %d", n)
-	}
-
-	file.Close()
-
-	dataFile.Blocks++
-
-	return count, nil
+	b.DataFiles[fileTime].Blocks++
+	return nil
 }
