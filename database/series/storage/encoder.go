@@ -15,15 +15,12 @@ func EncodeBlock(writer io.Writer, times []int64, values [][]uint64) (int, error
 	valuesAvailable := len(times)
 	encoded := make([][]uint64, len(values))
 
-	//valuesCopy := make([][]uint64, len(values)) todo: remove this
 	for i, val := range values {
 		if len(val) != valuesAvailable {
 			panic("input slices have different lengths")
 		}
-		encoded[i] = make([]uint64, 0)
-		//
-		//valuesCopy[i] = make([]uint64, valuesAvailable)
-		//copy(valuesCopy[i], val)
+		// pre-allocate some words to make appends faster
+		encoded[i] = make([]uint64, 64)[:0]
 	}
 
 	// try to fit as many values into 512 words as possible
