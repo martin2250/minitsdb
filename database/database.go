@@ -67,8 +67,7 @@ func (ss *Database) InsertPoint(p ingest.Point) error {
 	}
 
 	if ss.Series[indices[0]].CheckFlush() {
-		err = ss.Series[indices[0]].Flush()
-		return err
+		ss.Series[indices[0]].Flush()
 	}
 
 	return nil

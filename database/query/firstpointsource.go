@@ -1,25 +1,44 @@
 package query
 
 import (
+	"github.com/martin2250/minitsdb/database"
 	"github.com/martin2250/minitsdb/database/series"
+	"github.com/martin2250/minitsdb/database/series/storage"
 	"github.com/martin2250/minitsdb/util"
 	"io"
+	"math"
 )
 
 // todo: rename this mf
 // FirstPointSource reads and aggregates points from the first bucket of a series and RAM
+// this is separate from highpointsource (needs renaming even more than this), as both the first bucket and ram don't have pre-downsampled values
 type FirstPointSource struct {
-	//series      *series.Series
-	params    *Parameters
-	values    [][]int64
-	valuesRAM [][]int64
-	reader    series.BucketReader
-	//currentTime int64
+	series *series.Series
+	params *Parameters
+	buffer database.PointBuffer
+	reader storage.FileDecoder
 }
 
-func (s *FirstPointSource) Next() ([][]int64, error) {
+func (s *FirstPointSource) Next() (database.PointBuffer, error) {
+	// read header and find first block that contains points within query range
+	header := storage.BlockHeader{
+		TimeLast: math.MinInt64,
+	}
+
+	for header.TimeLast < s.params.TimeStart {
+		var err error
+		header, err = s.reader.DecodeHeader()
+
+		if err != nil {
+			return database.PointBuffer{}, err
+		}
+
+		if header.TimeFirst > s.params.TimeEnd {
+			return database.PointBuffer{}, io.EOF
+		}
+	}
 	// read block from reader
-	valuesNext, err := s.reader.ReadNextBlock()
+	decoded, err := s.reader.DecodeBlock()
 
 	// check for EOF seperately
 	var isEOF = false
@@ -27,50 +46,50 @@ func (s *FirstPointSource) Next() ([][]int64, error) {
 	if err == io.EOF {
 		isEOF = true
 	} else if err != nil {
-		return nil, err
+		return database.PointBuffer{}, err
 	}
 
-	// append values to buffer todo: make this nil check not necessary
-	if valuesNext != nil {
-		for i, v := range valuesNext {
-			s.values[i] = append(s.values[i], v...)
+	if !isEOF {
+		// append values to buffer
+		timeNew, err := storage.TimeTransformer.Revert(decoded[0])
+		if err != nil {
+			return database.PointBuffer{}, err
 		}
-	}
+		s.buffer.Time = append(s.buffer.Time, timeNew...)
 
-	// append RAM values if bucket reader is at end
-	if isEOF {
-		// loop over all points in RAM
-		for indexRAM, time := range s.valuesRAM[0] {
-			// check if the time of this point was already read by the bucketreader
-			indexBuffer := util.IndexOfInt64(s.values[0], time)
-
-			if indexBuffer == -1 {
-				// time not present in buffer, append to buffer
-				//for indexColumn, val := range s.valuesRAM[indexRAM] {
-				//	s.values[indexColumn] = append(s.values[indexColumn], val)
-				//}
-				for iOut, col := range s.params.Columns {
-					s.values[iOut+1] = append(s.values[iOut+1], s.valuesRAM[col.Index+1][indexRAM])
-				}
-				s.values[0] = append(s.values[0], time)
-			} else {
-				// time was already present in file, update values just in case
-				for indexColumn, val := range s.valuesRAM[indexRAM] {
-					s.values[indexColumn][indexBuffer] = val
-				}
+		valuesNew := make([][]int64, len(s.params.Columns))
+		for i, d := range decoded[1:] {
+			valuesNew[i], err = s.series.Columns[s.params.Columns[i].Index].Transformer.Revert(d)
+			if err != nil {
+				return database.PointBuffer{}, err
 			}
+		}
+
+		s.buffer.AppendBuffer(database.PointBuffer{
+			Time:   timeNew,
+			Values: valuesNew,
+		})
+	} else {
+		// append RAM values if bucket reader is at end
+		// loop over all points in RAM
+		for i := range s.series.Buffer.Time {
+			s.buffer.InsertPoint(s.series.Buffer.At(i))
 		}
 	}
 
 	// create output array
-	output := make([][]int64, len(s.params.Columns)+1)
+	output := database.PointBuffer{
+		Time:   make([]int64, 0),
+		Values: make([][]int64, len(s.params.Columns)),
+	}
 
-	for i := range output {
-		output[i] = make([]int64, 0)
+	for i := range output.Values {
+		output.Values[i] = make([]int64, 0)
 	}
 
 	// downsample data into output array
-	for len(s.values[0]) > 0 {
+	// todo: continue work here
+	for s.buffer.Len() > 0 {
 		// for convenience
 		time := s.values[0]
 
@@ -139,13 +158,46 @@ func (s *FirstPointSource) Next() ([][]int64, error) {
 }
 
 // NewFirstPointSource creates a new fps and initializes the bucket reader
+// valuesRAM: points that are stored in series.Values
 // params.TimeStart gets adjusted to reflect the values already read
-func NewFirstPointSource(bucket series.Bucket, valuesRAM [][]int64, params *Parameters) (FirstPointSource, error) {
+func NewFirstPointSource(series *series.Series, params *Parameters) FirstPointSource {
+	b := series.Buckets[0]
+	// create list of relevant files in first bucket
+	files := make([]string, 0, len(b.DataFiles))
+
+	for time, file := range b.DataFiles {
+		// check file ends before query start
+		if time+b.TimeResolution*(int64(b.PointsPerFile)-1) < params.TimeStart {
+			continue
+		}
+		// check if file begins after query end
+		if time > params.TimeEnd {
+			continue
+		}
+		files = append(files, file.Path)
+	}
+
+	// create column indices for decoder
+	colIndices := make([]int, len(params.Columns)+1)
+	colIndices[0] = 0 // time
+	for i, col := range params.Columns {
+		colIndices[i+1] = col.Index + 1
+	}
+
+	// fix parameter times to make further roundin operations unnecessary
+	// todo: this should probably be somewhere else
+	// we only want values where roundDown(time) >= timeStart
+	params.TimeStart = util.RoundUp(params.TimeStart, params.TimeStep)
+	// we need values after timeEnd, as roundDown(time) might still be <= timeEnd
+	params.TimeEnd = util.RoundDown(params.TimeEnd, params.TimeStep) + params.TimeStep - 1
+
 	// create point source struct
 	s := FirstPointSource{
-		valuesRAM: valuesRAM,
-		values:    make([][]int64, len(params.Columns)+1),
-		params:    params,
+		series: series,
+		times:  make([]int64, 0),
+		values: make([][]int64, len(params.Columns)),
+		params: params,
+		reader: storage.NewFileDecoder(files, colIndices),
 	}
 
 	// init value buffer
@@ -153,25 +205,5 @@ func NewFirstPointSource(bucket series.Bucket, valuesRAM [][]int64, params *Para
 		s.values[i] = make([]int64, 0)
 	}
 
-	// create bucket reader parameters
-	var readerParams = series.BucketReaderParameters{
-		TimeFrom: util.RoundDown(params.TimeStart, params.TimeStep),
-		TimeTo:   util.RoundUp(params.TimeEnd, params.TimeStep),
-		Columns:  []int{0}, // time column is always read
-	}
-
-	// copy columns
-	for _, col := range params.Columns {
-		readerParams.Columns = append(readerParams.Columns, col.Index+1) // offset because of time column
-	}
-
-	// create bucket reader
-	var err error
-	s.reader, err = bucket.CreateReader(readerParams)
-
-	if err != nil {
-		return FirstPointSource{}, err
-	}
-
-	return s, nil
+	return s
 }

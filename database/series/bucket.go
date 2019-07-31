@@ -4,14 +4,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/martin2250/minitsdb/util"
 	"io"
 	"io/ioutil"
 	"math"
 	"os"
 	"path"
-	"strconv"
-
-	"github.com/martin2250/minitsdb/util"
 
 	"github.com/golang/glog"
 	"github.com/martin2250/minitsdb/database/series/storage"
@@ -39,21 +37,18 @@ type Bucket struct {
 
 	// indicates if this is the first (highest resolution) bucket (contains no aggregations)
 	First bool
-}
 
-// GetPath returns the path where database files are stored
-func (b Bucket) GetPath() string {
-	return path.Join(b.series.Path, strconv.FormatInt(b.TimeResolution, 10))
+	Path string
 }
 
 // GetFileName returns the name of the database file that starts at time
 func (b Bucket) GetFileName(time int64) string {
-	return path.Join(b.GetPath(), fmt.Sprintf("%011d.mdb", time))
+	return path.Join(b.Path, fmt.Sprintf("%011d.mdb", time))
 }
 
 // GetDataFiles returns a list of the starting times of all database files
 func (b Bucket) GetDataFiles() ([]int64, error) {
-	files, err := ioutil.ReadDir(b.GetPath())
+	files, err := ioutil.ReadDir(b.Path)
 
 	if err != nil {
 		return nil, err
@@ -88,11 +83,11 @@ func (b *Bucket) loadFiles() error {
 	b.DataFiles = make(map[int64]*DataFile, 0)
 
 	// check if bucket folder exists
-	stat, err := os.Stat(b.GetPath())
+	stat, err := os.Stat(b.Path)
 
 	// create if not exists
 	if os.IsNotExist(err) {
-		os.Mkdir(b.GetPath(), 0755)
+		os.Mkdir(b.Path, 0755)
 		return nil
 	}
 
@@ -102,11 +97,11 @@ func (b *Bucket) loadFiles() error {
 
 	// check if directory
 	if !stat.IsDir() {
-		return fmt.Errorf("bucket dir %s is a file", b.GetPath())
+		return fmt.Errorf("bucket dir %s is a file", b.Path)
 	}
 
 	// list database files
-	files, err := ioutil.ReadDir(b.GetPath())
+	files, err := ioutil.ReadDir(b.Path)
 
 	if err != nil {
 		return err
@@ -144,7 +139,7 @@ func (b *Bucket) loadFiles() error {
 		}
 
 		df := DataFile{
-			Path:   path.Join(b.GetPath(), file.Name()),
+			Path:   path.Join(b.Path, file.Name()),
 			Blocks: blocks,
 		}
 

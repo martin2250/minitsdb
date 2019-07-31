@@ -100,7 +100,7 @@ func (q *Query) ReadNext() ([][]int64, error) {
 			}
 			b := q.series.Buckets[q.buckets[0]]
 			if b.First {
-				source, err := NewFirstPointSource(b, q.series.Values, &q.Param)
+				source := NewFirstPointSource(q.series, &q.Param)
 
 				if err != nil {
 					return nil, err

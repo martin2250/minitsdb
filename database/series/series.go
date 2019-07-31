@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/martin2250/minitsdb/database"
 	"io"
 	"math"
+	"path"
+	"strconv"
 	"time"
 
 	"github.com/martin2250/minitsdb/database/series/storage"
@@ -23,8 +26,7 @@ type Column struct {
 
 // Series describes a time series, id'd by a name and tags
 type Series struct {
-	Time   []int64
-	Values [][]int64
+	Buffer database.PointBuffer
 
 	OverwriteLast bool // data buffer contains last block on disk, overwrite
 	Path          string
@@ -235,6 +237,7 @@ func OpenSeries(seriespath string) (Series, error) {
 			TimeResolution: timeStep,
 			PointsPerFile:  conf.PointsFile,
 			First:          i == 0,
+			Path:           path.Join(s.Path, strconv.FormatInt(timeStep, 10)),
 		}
 
 		err = s.Buckets[i].Init()
