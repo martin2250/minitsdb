@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/martin2250/minitsdb/database"
 	"io"
 	"math"
 	"path"
@@ -26,7 +25,8 @@ type Column struct {
 
 // Series describes a time series, id'd by a name and tags
 type Series struct {
-	Buffer database.PointBuffer
+	// todo: make buffer private
+	Buffer PointBuffer
 
 	OverwriteLast bool // data buffer contains last block on disk, overwrite
 	Path          string
@@ -51,8 +51,49 @@ var ErrColumnAmbiguous = errors.New("point values matches two columns")
 // ErrUnknownColumn indicates that the insert failed because one of the values could not be assigned to a column
 var ErrUnknownColumn = errors.New("value doesn't match any columns")
 
+// ConvertPoint converts a point from the ingest format (values and maps of tags) to the series format (list of values in fixed order)
+func (s Series) ConvertPoint(p ingest.Point) (Point, error) {
+	// number of values must match
+	if len(p.Values) != len(s.Columns) {
+		return Point{}, ErrColumnMismatch
+	}
+
+	// holds output value
+	out := Point{
+		Time:   p.Time,
+		Values: make([]int64, len(s.Columns)),
+	}
+
+	// true for every column that has already been assigned a value,
+	// used to check if two values from p match the same column
+	filled := make([]bool, len(s.Columns))
+
+	for _, v := range p.Values {
+		indices := s.GetIndices(v.Tags)
+
+		if len(indices) == 0 {
+			return Point{}, ErrUnknownColumn
+		} else if len(indices) != 1 {
+			return Point{}, ErrColumnAmbiguous
+		}
+
+		i := indices[0]
+
+		if filled[i] {
+			return Point{}, ErrColumnMismatch
+		}
+
+		filled[i] = true
+
+		valf := v.Value * math.Pow10(s.Columns[i].Decimals)
+		out.Values[i] = int64(math.Round(valf))
+	}
+
+	return out, nil
+}
+
 // InsertPoint tries to insert a point into the Series, returns nil if successful
-func (s *Series) InsertPoint(p ingest.Point) error {
+func (s *Series) InsertPoint(p Point) error {
 	// check if number of values matches columns
 	if len(p.Values) != len(s.Columns) {
 		return ErrColumnMismatch
@@ -63,59 +104,7 @@ func (s *Series) InsertPoint(p ingest.Point) error {
 		return ErrInsertAtEnd
 	}
 
-	// assign point values to columns
-	// indices [index of point.Values] = index of s.Values
-	indices := make([]int, len(p.Values))
-
-	// go through all values in point
-	for indexValue, value := range p.Values {
-		indicesCol := s.GetIndices(value.Tags)
-
-		if len(indicesCol) == 0 {
-			return ErrUnknownColumn
-		} else if len(indicesCol) != 1 {
-			return ErrColumnAmbiguous
-		}
-
-		iCol := indicesCol[0] + 1
-
-		for _, iColOther := range indices {
-			if iCol == iColOther {
-				return ErrColumnMismatch
-			}
-		}
-
-		indices[indexValue] = iCol // account for time column
-	}
-
-	// check if any column didn't receive a value (this shouldn't happen based on previous checks)
-	for _, i := range indices {
-		if i == 0 {
-			return ErrColumnMismatch
-		}
-	}
-
-	// check if there is already a value at the point's time
-	indexBuffer := util.IndexOfInt64(s.Values[0], p.Time)
-
-	if indexBuffer == -1 {
-		// time not present in buffer, append to buffer
-		indexBuffer = len(s.Values[0])
-
-		for i := range s.Values {
-			s.Values[i] = append(s.Values[i], 0)
-		}
-
-		s.Values[0][indexBuffer] = p.Time
-	}
-
-	// todo: tidy up this hot mess that is indexColumn
-	for indexPoint, indexColumn := range indices {
-		valf := p.Values[indexPoint].Value
-		valf *= math.Pow10(s.Columns[indexColumn-1].Decimals)
-		vali := int64(math.Round(valf))
-		s.Values[indexColumn][indexBuffer] = vali
-	}
+	s.Buffer.InsertPoint(p)
 
 	return nil
 }
@@ -248,21 +237,13 @@ func OpenSeries(seriespath string) (Series, error) {
 	}
 
 	// create top level value array
-	s.Values = make([][]int64, len(s.Columns))
+	s.Buffer = NewPointBuffer(len(s.Columns))
 
 	// if the last block of the first bucket is not full, read it's values and set the overwrite last flag
-	valuesRead, err := s.checkFirstBucket()
+	err = s.checkFirstBucket()
 
 	if err != nil {
 		return Series{}, err
-	}
-
-	// if no values were read, initialize value and time buffers manually
-	if !valuesRead {
-		for i := range s.Values {
-			s.Values[i] = make([]int64, 0)
-		}
-		s.Time = make([]int64, 0)
 	}
 
 	return s, nil
@@ -270,18 +251,18 @@ func OpenSeries(seriespath string) (Series, error) {
 
 // checkFirstBucket checks the last block in the first bucket for free space according to ReuseMax
 // errors are to be treated as fatal
-func (s *Series) checkFirstBucket() (bool, error) {
+func (s *Series) checkFirstBucket() error {
 	b := &s.Buckets[0]
 
 	// read last block from file
 	buf, err := b.getLastBlock()
 
 	if err == io.EOF {
-		return false, nil
+		return nil
 	}
 
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	// decode header
@@ -292,17 +273,17 @@ func (s *Series) checkFirstBucket() (bool, error) {
 	header, err := d.DecodeHeader()
 
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	// check if database file matches series
 	if header.NumColumns != (len(s.Columns) + 1) {
-		return false, errors.New("database file does not match series")
+		return errors.New("database file does not match series")
 	}
 
 	// check if last block can be reused
 	if header.BytesUsed > s.ReuseMax {
-		return false, nil
+		return nil
 	}
 
 	// fill decoder columns
@@ -315,30 +296,30 @@ func (s *Series) checkFirstBucket() (bool, error) {
 	values, err := d.DecodeBlock()
 
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	// decode time and values
-	s.Time, err = storage.DiffTransformer{N: 2}.Revert(values[0])
+	s.Buffer.Time, err = storage.TimeTransformer.Revert(values[0])
 
 	if err != nil {
-		return false, err
+		return err
 	}
 
-	for i := range values {
-		s.Values[i], err = s.Columns[i].Transformer.Revert(values[i+1])
+	for i := range s.Columns {
+		s.Buffer.Values[i], err = s.Columns[i].Transformer.Revert(values[i+1])
 
 		if err != nil {
-			return false, err
+			return err
 		}
 	}
 
 	s.OverwriteLast = true
-	return true, nil
+	return nil
 }
 
 func (s *Series) CheckFlush() bool {
-	if len(s.Values[0]) > s.BufferSize {
+	if s.Buffer.Len() > s.BufferSize {
 		return true
 	}
 
@@ -350,13 +331,7 @@ func (s *Series) CheckFlush() bool {
 // Discard the first n values from RAM
 // copy arrays to allow GC to work
 func (s *Series) Discard(n int) {
-	if n > len(s.Time) {
-		n = len(s.Time)
-	}
-	s.Time = util.Copy1DInt64(s.Time[n:])
-	for i := range s.Values {
-		s.Values[i] = util.Copy1DInt64(s.Values[i][n:])
-	}
+	s.Buffer.Discard(n)
 }
 
 // SaveDiscard saves n values to a recovery file and then calls discard
@@ -373,20 +348,20 @@ func (s *Series) Flush() {
 	overwrite := s.OverwriteLast
 	s.OverwriteLast = false
 	// don't flush if empty
-	if len(s.Time) == 0 {
+	if s.Buffer.Len() == 0 {
 		return
 	}
 
 	b := &s.Buckets[0]
 
 	// check file boundaries
-	count, fileTime := b.GetStorageTime(s.Time)
+	count, fileTime := b.GetStorageTime(s.Buffer.Time)
 
 	// transform values
 	var err error
-	transformed := make([][]uint64, len(s.Values)+1)
+	transformed := make([][]uint64, len(s.Columns)+1)
 
-	transformed[0], err = storage.TimeTransformer.Apply(s.Time[:count])
+	transformed[0], err = storage.TimeTransformer.Apply(s.Buffer.Time[:count])
 	if err != nil {
 		// todo: log this properly
 		s.SaveDiscard(count)
@@ -394,8 +369,8 @@ func (s *Series) Flush() {
 		return
 	}
 
-	for i := range s.Values {
-		transformed[i+1], err = s.Columns[i].Transformer.Apply(s.Values[i][:count])
+	for i := range s.Columns {
+		transformed[i+1], err = s.Columns[i].Transformer.Apply(s.Buffer.Values[i][:count])
 		if err != nil {
 			// todo: log this properly
 			s.SaveDiscard(count)
@@ -406,7 +381,7 @@ func (s *Series) Flush() {
 
 	// encode values
 	var buffer bytes.Buffer
-	header, err := storage.EncodeBlock(&buffer, s.Time[:count], transformed)
+	header, err := storage.EncodeBlock(&buffer, s.Buffer.Time[:count], transformed)
 
 	if err != nil {
 		// todo: log this properly

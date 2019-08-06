@@ -22,7 +22,7 @@ type Parameters struct {
 }
 
 type PointSource interface {
-	Next() ([][]int64, error)
+	Next() (series.PointBuffer, error)
 }
 
 // Query does stuff
@@ -89,38 +89,30 @@ func NewQuery(s *series.Series, p Parameters, w io.Writer) Query {
 	return q
 }
 
-func (q *Query) ReadNext() ([][]int64, error) {
-	var values [][]int64
-	var err error
-
-	for values == nil {
+func (q *Query) ReadNext() (series.PointBuffer, error) {
+	for {
 		if q.currentSource == nil {
 			if len(q.buckets) == 0 {
-				return nil, io.EOF
+				return series.PointBuffer{}, io.EOF
 			}
 			b := q.series.Buckets[q.buckets[0]]
 			if b.First {
 				source := NewFirstPointSource(q.series, &q.Param)
-
-				if err != nil {
-					return nil, err
-				}
-
 				q.currentSource = &source
 			} else {
-				return nil, errors.New("highpointsource not implemented yet")
+				return series.PointBuffer{}, errors.New("highpointsource not implemented yet")
 			}
 		}
 
-		values, err = q.currentSource.Next()
+		buffer, err := q.currentSource.Next()
 
-		if err != nil {
+		if err == nil {
+			return buffer, nil
+		} else {
 			q.currentSource = nil
 			if err != io.EOF {
-				return nil, err
+				return series.PointBuffer{}, err
 			}
 		}
 	}
-
-	return values, err
 }

@@ -1,7 +1,6 @@
 package query
 
 import (
-	"github.com/martin2250/minitsdb/database"
 	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/database/series/storage"
 	"github.com/martin2250/minitsdb/util"
@@ -15,11 +14,11 @@ import (
 type FirstPointSource struct {
 	series *series.Series
 	params *Parameters
-	buffer database.PointBuffer
+	buffer series.PointBuffer
 	reader storage.FileDecoder
 }
 
-func (s *FirstPointSource) Next() (database.PointBuffer, error) {
+func (s *FirstPointSource) Next() (series.PointBuffer, error) {
 	// read header and find first block that contains points within query range
 	header := storage.BlockHeader{
 		TimeLast: math.MinInt64,
@@ -30,11 +29,11 @@ func (s *FirstPointSource) Next() (database.PointBuffer, error) {
 		header, err = s.reader.DecodeHeader()
 
 		if err != nil {
-			return database.PointBuffer{}, err
+			return series.PointBuffer{}, err
 		}
 
 		if header.TimeFirst > s.params.TimeEnd {
-			return database.PointBuffer{}, io.EOF
+			return series.PointBuffer{}, io.EOF
 		}
 	}
 	// read block from reader
@@ -46,14 +45,14 @@ func (s *FirstPointSource) Next() (database.PointBuffer, error) {
 	if err == io.EOF {
 		isEOF = true
 	} else if err != nil {
-		return database.PointBuffer{}, err
+		return series.PointBuffer{}, err
 	}
 
 	if !isEOF {
 		// append values to buffer
 		timeNew, err := storage.TimeTransformer.Revert(decoded[0])
 		if err != nil {
-			return database.PointBuffer{}, err
+			return series.PointBuffer{}, err
 		}
 		s.buffer.Time = append(s.buffer.Time, timeNew...)
 
@@ -61,11 +60,11 @@ func (s *FirstPointSource) Next() (database.PointBuffer, error) {
 		for i, d := range decoded[1:] {
 			valuesNew[i], err = s.series.Columns[s.params.Columns[i].Index].Transformer.Revert(d)
 			if err != nil {
-				return database.PointBuffer{}, err
+				return series.PointBuffer{}, err
 			}
 		}
 
-		s.buffer.AppendBuffer(database.PointBuffer{
+		s.buffer.AppendBuffer(series.PointBuffer{
 			Time:   timeNew,
 			Values: valuesNew,
 		})
@@ -78,7 +77,7 @@ func (s *FirstPointSource) Next() (database.PointBuffer, error) {
 	}
 
 	// create output array
-	output := database.PointBuffer{
+	output := series.PointBuffer{
 		Time:   make([]int64, 0),
 		Values: make([][]int64, len(s.params.Columns)),
 	}
@@ -90,10 +89,7 @@ func (s *FirstPointSource) Next() (database.PointBuffer, error) {
 	// downsample data into output array
 	// todo: continue work here
 	for s.buffer.Len() > 0 {
-		// for convenience
-		time := s.values[0]
-
-		var timeStepStart = util.RoundDown(time[0], s.params.TimeStep)
+		var timeStepStart = util.RoundDown(s.buffer.Time[0], s.params.TimeStep)
 
 		// stop if this time step exceeds timeend
 		if timeStepStart > s.params.TimeEnd {
@@ -104,7 +100,7 @@ func (s *FirstPointSource) Next() (database.PointBuffer, error) {
 
 		// find first point that doesn't belong in this time step anymore
 		var indexEnd = -1
-		for i, timeend := range time {
+		for i, timeend := range s.buffer.Time {
 			// enough values if this point is the last of this step todo: replace -1 with bucket time step
 			if timeend == timeStepStart+s.params.TimeStep-1 {
 				indexEnd = i + 1
@@ -121,17 +117,17 @@ func (s *FirstPointSource) Next() (database.PointBuffer, error) {
 		if indexEnd == -1 {
 			// this is firstpointsource, so there are no more points to complete this time step, just use all available values
 			if isEOF {
-				indexEnd = len(time)
+				indexEnd = len(s.buffer.Time)
 			} else {
 				break
 			}
 		}
 
 		// append time of point to output
-		output[0] = append(output[0], timeStepStart)
+		output.Time = append(output.Time, timeStepStart)
 		// append downsampled values
 		for indexCol, col := range s.params.Columns {
-			output[indexCol+1] = append(output[indexCol+1], col.Downsampler.DownsampleFirst(s.values[indexCol+1][0:indexEnd]))
+			output.Values[indexCol] = append(output.Values[indexCol], col.Downsampler.DownsampleFirst(s.buffer.Values[indexCol][0:indexEnd]))
 		}
 
 		// update query range
@@ -144,10 +140,8 @@ func (s *FirstPointSource) Next() (database.PointBuffer, error) {
 			break
 		}
 
-		// remove points from s.values
-		for i := range s.values {
-			s.values[i] = s.values[i][indexEnd:]
-		}
+		// remove points from buffer
+		s.buffer.Discard(indexEnd)
 	}
 
 	if isEOF {
@@ -160,8 +154,8 @@ func (s *FirstPointSource) Next() (database.PointBuffer, error) {
 // NewFirstPointSource creates a new fps and initializes the bucket reader
 // valuesRAM: points that are stored in series.Values
 // params.TimeStart gets adjusted to reflect the values already read
-func NewFirstPointSource(series *series.Series, params *Parameters) FirstPointSource {
-	b := series.Buckets[0]
+func NewFirstPointSource(s *series.Series, params *Parameters) FirstPointSource {
+	b := s.Buckets[0]
 	// create list of relevant files in first bucket
 	files := make([]string, 0, len(b.DataFiles))
 
@@ -192,18 +186,12 @@ func NewFirstPointSource(series *series.Series, params *Parameters) FirstPointSo
 	params.TimeEnd = util.RoundDown(params.TimeEnd, params.TimeStep) + params.TimeStep - 1
 
 	// create point source struct
-	s := FirstPointSource{
-		series: series,
-		times:  make([]int64, 0),
-		values: make([][]int64, len(params.Columns)),
+	src := FirstPointSource{
+		series: s,
+		buffer: series.NewPointBuffer(len(params.Columns)),
 		params: params,
 		reader: storage.NewFileDecoder(files, colIndices),
 	}
 
-	// init value buffer
-	for i := range s.values {
-		s.values[i] = make([]int64, 0)
-	}
-
-	return s
+	return src
 }

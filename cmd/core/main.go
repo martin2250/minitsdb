@@ -63,18 +63,16 @@ func main() {
 			for {
 				vals, err := q.ReadNext()
 
-				if vals != nil {
-					for i := range vals[0] {
-						io.WriteString(q.Writer, strconv.FormatInt(vals[0][i], 10))
+				if err == nil {
+					for i := range vals.Time {
+						io.WriteString(q.Writer, strconv.FormatInt(vals.Time[i], 10))
 						for j, _ := range q.Param.Columns {
 							q.Writer.Write([]byte{0x20}) // spaaaaaacee!
-							io.WriteString(q.Writer, strconv.FormatInt(vals[j+1][i], 10))
+							io.WriteString(q.Writer, strconv.FormatInt(vals.Values[j][i], 10))
 						}
 						q.Writer.Write([]byte{0x0A}) // newline
 					}
-				}
-
-				if err != nil {
+				} else {
 					fmt.Fprint(q.Writer, err)
 					break
 				}

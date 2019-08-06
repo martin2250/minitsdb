@@ -60,7 +60,13 @@ func (ss *Database) InsertPoint(p ingest.Point) error {
 		return ErrSeriesAmbiguous
 	}
 
-	err := ss.Series[indices[0]].InsertPoint(p)
+	ps, err := ss.Series[indices[0]].ConvertPoint(p)
+
+	if err != nil {
+		return err
+	}
+
+	err = ss.Series[indices[0]].InsertPoint(ps)
 
 	if err != nil {
 		return err
