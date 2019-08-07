@@ -1,4 +1,4 @@
-package storage
+package encoding
 
 import (
 	"testing"
@@ -12,7 +12,7 @@ func testTransform(t *testing.T, transformer Transformer) {
 	copy(inputCopy, input)
 
 	// apply transformation
-	encoded, err := transformer.Apply(inputCopy)
+	encoded, err := Apply(inputCopy)
 
 	if err != nil {
 		t.Error(err)
@@ -28,7 +28,7 @@ func testTransform(t *testing.T, transformer Transformer) {
 	}
 
 	// revert transformation
-	decoded, err := transformer.Revert(encoded)
+	decoded, err := Revert(encoded)
 
 	if err != nil {
 		t.Error(err)

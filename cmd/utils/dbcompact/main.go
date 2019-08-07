@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/martin2250/minitsdb/database/series/storage/encoding"
 	"io"
 	"log"
 	"os"
@@ -78,7 +79,7 @@ func main() {
 			continue
 		}
 
-		buffer, count, err := storage.EncodeBlock(values)
+		buffer, count, err := encoding.EncodeBlock(values)
 
 		if err != nil {
 			log.Fatalf("Error encoding block %v\n", err)

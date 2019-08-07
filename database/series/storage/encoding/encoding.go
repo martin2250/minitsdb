@@ -1,4 +1,4 @@
-package storage
+package encoding
 
 // BlockHeader is a more usable version of the header stored at the beginning of each block
 type BlockHeader struct {

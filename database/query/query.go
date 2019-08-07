@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/martin2250/minitsdb/database/series"
+	"github.com/martin2250/minitsdb/database/series/storage"
 	"github.com/martin2250/minitsdb/util"
 	"io"
 )
@@ -22,7 +23,7 @@ type Parameters struct {
 }
 
 type PointSource interface {
-	Next() (series.PointBuffer, error)
+	Next() (storage.PointBuffer, error)
 }
 
 // Query does stuff
@@ -40,7 +41,7 @@ type Query struct {
 	Done chan struct{}
 }
 
-func findTimeStep(queryStep int64, buckets []series.Bucket) int64 {
+func findTimeStep(queryStep int64, buckets []storage.Bucket) int64 {
 	// find largest bucketStep smaller than queryStep
 	var largestBucketStep int64 = 0
 
@@ -89,18 +90,18 @@ func NewQuery(s *series.Series, p Parameters, w io.Writer) Query {
 	return q
 }
 
-func (q *Query) ReadNext() (series.PointBuffer, error) {
+func (q *Query) ReadNext() (storage.PointBuffer, error) {
 	for {
 		if q.currentSource == nil {
 			if len(q.buckets) == 0 {
-				return series.PointBuffer{}, io.EOF
+				return storage.PointBuffer{}, io.EOF
 			}
 			b := q.series.Buckets[q.buckets[0]]
 			if b.First {
 				source := NewFirstPointSource(q.series, &q.Param)
 				q.currentSource = &source
 			} else {
-				return series.PointBuffer{}, errors.New("highpointsource not implemented yet")
+				return storage.PointBuffer{}, errors.New("highpointsource not implemented yet")
 			}
 		}
 
@@ -111,7 +112,7 @@ func (q *Query) ReadNext() (series.PointBuffer, error) {
 		} else {
 			q.currentSource = nil
 			if err != io.EOF {
-				return series.PointBuffer{}, err
+				return storage.PointBuffer{}, err
 			}
 		}
 	}

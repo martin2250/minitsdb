@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/martin2250/minitsdb/database/series/storage"
+	"github.com/martin2250/minitsdb/database/series/storage/encoding"
 	"io"
 	"math"
 	"path"
 	"strconv"
 	"time"
-
-	"github.com/martin2250/minitsdb/database/series/storage"
 
 	"github.com/martin2250/minitsdb/ingest"
 	"github.com/martin2250/minitsdb/util"
@@ -20,18 +20,21 @@ import (
 type Column struct {
 	Tags        map[string]string
 	Decimals    int
-	Transformer storage.Transformer
+	Transformer encoding.Transformer
 }
 
 // Series describes a time series, id'd by a name and tags
 type Series struct {
 	// todo: make buffer private
-	Buffer PointBuffer
+	Buffer storage.PointBuffer
 
 	OverwriteLast bool // data buffer contains last block on disk, overwrite
 	Path          string
 	Columns       []Column
-	Buckets       []Bucket
+	Buckets       []storage.Bucket
+
+	// transformers used for the first bucket
+	TransformersFirst []encoding.Transformer
 
 	Tags       map[string]string
 	FlushDelay time.Duration
@@ -52,14 +55,14 @@ var ErrColumnAmbiguous = errors.New("point values matches two columns")
 var ErrUnknownColumn = errors.New("value doesn't match any columns")
 
 // ConvertPoint converts a point from the ingest format (values and maps of tags) to the series format (list of values in fixed order)
-func (s Series) ConvertPoint(p ingest.Point) (Point, error) {
+func (s Series) ConvertPoint(p ingest.Point) (storage.Point, error) {
 	// number of values must match
 	if len(p.Values) != len(s.Columns) {
-		return Point{}, ErrColumnMismatch
+		return storage.Point{}, ErrColumnMismatch
 	}
 
 	// holds output value
-	out := Point{
+	out := storage.Point{
 		Time:   p.Time,
 		Values: make([]int64, len(s.Columns)),
 	}
@@ -72,15 +75,15 @@ func (s Series) ConvertPoint(p ingest.Point) (Point, error) {
 		indices := s.GetIndices(v.Tags)
 
 		if len(indices) == 0 {
-			return Point{}, ErrUnknownColumn
+			return storage.Point{}, ErrUnknownColumn
 		} else if len(indices) != 1 {
-			return Point{}, ErrColumnAmbiguous
+			return storage.Point{}, ErrColumnAmbiguous
 		}
 
 		i := indices[0]
 
 		if filled[i] {
-			return Point{}, ErrColumnMismatch
+			return storage.Point{}, ErrColumnMismatch
 		}
 
 		filled[i] = true
@@ -93,7 +96,7 @@ func (s Series) ConvertPoint(p ingest.Point) (Point, error) {
 }
 
 // InsertPoint tries to insert a point into the Series, returns nil if successful
-func (s *Series) InsertPoint(p Point) error {
+func (s *Series) InsertPoint(p storage.Point) error {
 	// check if number of values matches columns
 	if len(p.Values) != len(s.Columns) {
 		return ErrColumnMismatch
@@ -155,7 +158,7 @@ func OpenSeries(seriespath string) (Series, error) {
 		BufferSize: conf.Buffer,
 		ReuseMax:   conf.ReuseMax,
 		Columns:    make([]Column, 0),
-		Buckets:    make([]Bucket, len(conf.Buckets)),
+		Buckets:    make([]storage.Bucket, len(conf.Buckets)),
 		Tags:       conf.Tags,
 
 		Path: seriespath,
@@ -164,17 +167,17 @@ func OpenSeries(seriespath string) (Series, error) {
 	// create columns
 	for _, colconf := range conf.Columns {
 		// create transformer
-		var transformer storage.Transformer
+		var transformer encoding.Transformer
 		if colconf.Transformer != "" {
 			var arg int
 			if _, err := fmt.Sscanf(colconf.Transformer, "D%d", &arg); err != nil {
-				transformer = storage.DiffTransformer{N: arg}
+				transformer = encoding.DiffTransformer{N: arg}
 			} else {
 				return Series{}, fmt.Errorf("%s matches no known transformers", colconf.Transformer)
 			}
 		} else {
 			// default to differentiating once
-			transformer = storage.DiffTransformer{N: 1}
+			transformer = encoding.DiffTransformer{N: 1}
 		}
 
 		if colconf.Duplicate == nil {
@@ -221,7 +224,7 @@ func OpenSeries(seriespath string) (Series, error) {
 	for i, bc := range conf.Buckets {
 		timeStep *= int64(bc.Factor)
 
-		s.Buckets[i] = Bucket{
+		s.Buckets[i] = storage.Bucket{
 			TimeLast:       math.MinInt64,
 			TimeResolution: timeStep,
 			PointsPerFile:  conf.PointsFile,
@@ -237,7 +240,7 @@ func OpenSeries(seriespath string) (Series, error) {
 	}
 
 	// create top level value array
-	s.Buffer = NewPointBuffer(len(s.Columns))
+	s.Buffer = storage.NewPointBuffer(len(s.Columns))
 
 	// if the last block of the first bucket is not full, read it's values and set the overwrite last flag
 	err = s.checkFirstBucket()
@@ -266,7 +269,7 @@ func (s *Series) checkFirstBucket() error {
 	}
 
 	// decode header
-	d := storage.NewDecoder()
+	d := encoding.NewDecoder()
 	d.SetReader(&buf)
 
 	// read last block header
@@ -300,7 +303,7 @@ func (s *Series) checkFirstBucket() error {
 	}
 
 	// decode time and values
-	s.Buffer.Time, err = storage.TimeTransformer.Revert(values[0])
+	s.Buffer.Time, err = encoding.TimeTransformer.Revert(values[0])
 
 	if err != nil {
 		return err
@@ -345,65 +348,26 @@ func (s *Series) SaveDiscard(n int) {
 // todo: b) or a configurable maximum amount of values is in the buffer
 // Flush does not return an error, errors are handled by the function itself
 func (s *Series) Flush() {
-	overwrite := s.OverwriteLast
-	s.OverwriteLast = false
-	// don't flush if empty
-	if s.Buffer.Len() == 0 {
-		return
-	}
+	fmt.Printf("flushing series %v with %d points\n", s.Tags, s.Buffer.Len())
 
-	b := &s.Buckets[0]
-
-	// check file boundaries
-	count, fileTime := b.GetStorageTime(s.Buffer.Time)
-
-	// transform values
-	var err error
-	transformed := make([][]uint64, len(s.Columns)+1)
-
-	transformed[0], err = storage.TimeTransformer.Apply(s.Buffer.Time[:count])
-	if err != nil {
-		// todo: log this properly
-		s.SaveDiscard(count)
-		fmt.Printf("ERROR while transforming time for series %v\n", s.Tags)
-		return
-	}
-
-	for i := range s.Columns {
-		transformed[i+1], err = s.Columns[i].Transformer.Apply(s.Buffer.Values[i][:count])
-		if err != nil {
-			// todo: log this properly
-			s.SaveDiscard(count)
-			fmt.Printf("ERROR while transforming values for series %v\n", s.Tags)
-			return
-		}
-	}
-
-	// encode values
-	var buffer bytes.Buffer
-	header, err := storage.EncodeBlock(&buffer, s.Buffer.Time[:count], transformed)
+	header, err := s.Buckets[0].WriteData(s.Buffer, s.OverwriteLast)
 
 	if err != nil {
-		// todo: log this properly
-		s.SaveDiscard(count)
-		fmt.Printf("ERROR while encoding values for series %v\n", s.Tags)
-		return
+		fmt.Printf("error while flushing series %v: %s, storing all values in recovery file", s.Tags, err.Error())
+		s.SaveDiscard(s.Buffer.Len())
 	}
 
-	// write transformed values to file
-	err = s.Buckets[0].WriteBlock(fileTime, buffer.Bytes(), overwrite)
+	//todo: move encoding etc. back out of bucket, bucket should only know uint64
 
-	if err != nil {
-		// todo: log this properly
-		s.SaveDiscard(header.NumPoints)
-		fmt.Printf("ERROR while encoding values for series %v\n", s.Tags)
-		return
-	}
+	fmt.Printf("wrote %d points to file, block size %d bytes", header.NumPoints, header.BytesUsed)
 
 	// don't discard points if we can reuse the block
-	if header.NumPoints == count && header.BytesUsed < s.ReuseMax {
+	if header.NumPoints == s.Buffer.Len() && header.BytesUsed < s.ReuseMax {
 		s.OverwriteLast = true
+		fmt.Println(", reusing buffer")
 	} else {
+		s.OverwriteLast = false
 		s.Discard(header.NumPoints)
+		fmt.Println(", flushing buffer")
 	}
 }

@@ -3,6 +3,7 @@ package query
 import (
 	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/database/series/storage"
+	"github.com/martin2250/minitsdb/database/series/storage/encoding"
 	"github.com/martin2250/minitsdb/util"
 	"io"
 	"math"
@@ -14,13 +15,13 @@ import (
 type FirstPointSource struct {
 	series *series.Series
 	params *Parameters
-	buffer series.PointBuffer
-	reader storage.FileDecoder
+	buffer storage.PointBuffer
+	reader encoding.FileDecoder
 }
 
-func (s *FirstPointSource) Next() (series.PointBuffer, error) {
+func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 	// read header and find first block that contains points within query range
-	header := storage.BlockHeader{
+	header := encoding.BlockHeader{
 		TimeLast: math.MinInt64,
 	}
 
@@ -29,11 +30,11 @@ func (s *FirstPointSource) Next() (series.PointBuffer, error) {
 		header, err = s.reader.DecodeHeader()
 
 		if err != nil {
-			return series.PointBuffer{}, err
+			return storage.PointBuffer{}, err
 		}
 
 		if header.TimeFirst > s.params.TimeEnd {
-			return series.PointBuffer{}, io.EOF
+			return storage.PointBuffer{}, io.EOF
 		}
 	}
 	// read block from reader
@@ -45,14 +46,14 @@ func (s *FirstPointSource) Next() (series.PointBuffer, error) {
 	if err == io.EOF {
 		isEOF = true
 	} else if err != nil {
-		return series.PointBuffer{}, err
+		return storage.PointBuffer{}, err
 	}
 
 	if !isEOF {
 		// append values to buffer
-		timeNew, err := storage.TimeTransformer.Revert(decoded[0])
+		timeNew, err := encoding.TimeTransformer.Revert(decoded[0])
 		if err != nil {
-			return series.PointBuffer{}, err
+			return storage.PointBuffer{}, err
 		}
 		s.buffer.Time = append(s.buffer.Time, timeNew...)
 
@@ -60,11 +61,11 @@ func (s *FirstPointSource) Next() (series.PointBuffer, error) {
 		for i, d := range decoded[1:] {
 			valuesNew[i], err = s.series.Columns[s.params.Columns[i].Index].Transformer.Revert(d)
 			if err != nil {
-				return series.PointBuffer{}, err
+				return storage.PointBuffer{}, err
 			}
 		}
 
-		s.buffer.AppendBuffer(series.PointBuffer{
+		s.buffer.AppendBuffer(storage.PointBuffer{
 			Time:   timeNew,
 			Values: valuesNew,
 		})
@@ -77,7 +78,7 @@ func (s *FirstPointSource) Next() (series.PointBuffer, error) {
 	}
 
 	// create output array
-	output := series.PointBuffer{
+	output := storage.PointBuffer{
 		Time:   make([]int64, 0),
 		Values: make([][]int64, len(s.params.Columns)),
 	}
@@ -188,9 +189,9 @@ func NewFirstPointSource(s *series.Series, params *Parameters) FirstPointSource 
 	// create point source struct
 	src := FirstPointSource{
 		series: s,
-		buffer: series.NewPointBuffer(len(params.Columns)),
+		buffer: storage.NewPointBuffer(len(params.Columns)),
 		params: params,
-		reader: storage.NewFileDecoder(files, colIndices),
+		reader: encoding.NewFileDecoder(files, colIndices),
 	}
 
 	return src

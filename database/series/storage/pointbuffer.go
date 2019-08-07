@@ -1,4 +1,4 @@
-package series
+package storage
 
 import "github.com/martin2250/minitsdb/util"
 
@@ -22,15 +22,15 @@ func (b *PointBuffer) InsertPoint(point Point) {
 	var atEnd bool  // value is appended to end of buffer
 
 	for {
+		if indexBuffer >= len(b.Time) {
+			atEnd = true
+			break
+		}
 		if b.Time[indexBuffer] == point.Time {
 			break
 		}
 		if b.Time[indexBuffer] > point.Time {
 			insert = true
-			break
-		}
-		if indexBuffer >= len(b.Time) {
-			atEnd = true
 			break
 		}
 		indexBuffer++

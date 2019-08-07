@@ -1,4 +1,6 @@
-package storage
+package encoding
+
+const BlockSize = 4096
 
 func applyZigzag(i int64) uint64 {
 	return uint64((i >> 63) ^ (i << 1))
