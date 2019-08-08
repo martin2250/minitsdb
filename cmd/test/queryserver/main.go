@@ -14,11 +14,12 @@ import (
 
 func query(writer http.ResponseWriter, from int64, to int64) error {
 	file, err := os.Open("../../data.base")
-	defer file.Close()
 
 	if err != nil {
 		return err
 	}
+
+	defer file.Close()
 
 	for {
 		buffer := make([]byte, 4096)

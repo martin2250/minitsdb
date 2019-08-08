@@ -11,7 +11,7 @@ func addRandomPoint(pf *PointFifo) {
 		Time: int64(rand.Intn(30000) + 100),
 		Tags: map[string]string{"k1": "v1"},
 		Values: []Value{
-			Value{
+			{
 				Tags:  map[string]string{"k1": "v1"},
 				Value: rand.ExpFloat64(),
 			},

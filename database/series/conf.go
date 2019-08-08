@@ -27,7 +27,7 @@ type YamlSeriesConfig struct {
 	FlushDelay time.Duration
 	Buffer     int
 	ReuseMax   int
-	PointsFile int
+	PointsFile int64
 
 	Tags map[string]string
 

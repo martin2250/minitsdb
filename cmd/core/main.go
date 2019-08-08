@@ -66,7 +66,7 @@ func main() {
 				if err == nil {
 					for i := range vals.Time {
 						io.WriteString(q.Writer, strconv.FormatInt(vals.Time[i], 10))
-						for j, _ := range q.Param.Columns {
+						for j := range q.Param.Columns {
 							q.Writer.Write([]byte{0x20}) // spaaaaaacee!
 							io.WriteString(q.Writer, strconv.FormatInt(vals.Values[j][i], 10))
 						}

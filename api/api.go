@@ -2,8 +2,8 @@ package api
 
 import (
 	"fmt"
-	"github.com/martin2250/minitsdb/database/query"
 	"github.com/martin2250/minitsdb/database/series"
+	"github.com/martin2250/minitsdb/database/series/query"
 	"log"
 	"net/http"
 	"os"

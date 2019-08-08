@@ -21,21 +21,21 @@ type column struct {
 }
 
 var columns = []column{
-	column{name: "frequency", phase: ""},
-	column{name: "power", phase: "A"},
-	column{name: "power", phase: "B"},
-	column{name: "power", phase: "C"},
-	column{name: "voltage", phase: "A"},
-	column{name: "voltage", phase: "B"},
-	column{name: "voltage", phase: "C"},
-	column{name: "current", phase: "A"},
-	column{name: "current", phase: "B"},
-	column{name: "current", phase: "C"},
-	column{name: "current", phase: "T"},
-	column{name: "energy", phase: "A"},
-	column{name: "energy", phase: "B"},
-	column{name: "energy", phase: "C"},
-	column{name: "energy", phase: "T"},
+	{name: "frequency", phase: ""},
+	{name: "power", phase: "A"},
+	{name: "power", phase: "B"},
+	{name: "power", phase: "C"},
+	{name: "voltage", phase: "A"},
+	{name: "voltage", phase: "B"},
+	{name: "voltage", phase: "C"},
+	{name: "current", phase: "A"},
+	{name: "current", phase: "B"},
+	{name: "current", phase: "C"},
+	{name: "current", phase: "T"},
+	{name: "energy", phase: "A"},
+	{name: "energy", phase: "B"},
+	{name: "energy", phase: "C"},
+	{name: "energy", phase: "T"},
 }
 
 // BinBuffer is the main server struct

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strconv"
 )
 
 // Bucket is a downsampling step
@@ -26,10 +27,13 @@ type Bucket struct {
 	// index: start time
 	DataFiles []DataFile
 
-	// indicates if this is the first (highest resolution) bucket (contains no aggregations)
-	First bool
-
 	Path string
+}
+
+func (b *Bucket) sortFiles() {
+	sort.Slice(b.DataFiles, func(i, j int) bool {
+		return b.DataFiles[i].TimeStart < b.DataFiles[j].TimeStart
+	})
 }
 
 func (b *Bucket) loadFiles() error {
@@ -59,9 +63,7 @@ func (b *Bucket) loadFiles() error {
 	}
 
 	// should already be sorted as ioutil returns list of files sorted
-	sort.Slice(b.DataFiles, func(i, j int) bool {
-		return b.DataFiles[i].TimeStart < b.DataFiles[j].TimeStart
-	})
+	b.sortFiles()
 
 	return nil
 }
@@ -97,13 +99,12 @@ func (b *Bucket) checkTimeLast() error {
 	return nil
 }
 
-func OpenBucket(path string, timeStep int64, pointsPerFile int64, first bool) (Bucket, error) {
+func OpenBucket(basePath string, timeStep int64, pointsPerFile int64) (Bucket, error) {
 	b := Bucket{
 		TimeLast:       math.MinInt64,
 		TimeResolution: timeStep,
 		PointsPerFile:  pointsPerFile,
-		First:          first,
-		Path:           path,
+		Path:           path.Join(basePath, strconv.FormatInt(timeStep, 10)),
 	}
 
 	err := b.loadFiles()
@@ -131,59 +132,29 @@ func (b *Bucket) createDataFile(fileTime int64) *DataFile {
 	}
 	b.DataFiles = append(b.DataFiles, NewDataFile(b.Path, fileTime, b.TimeResolution*b.PointsPerFile))
 
+	b.sortFiles()
+
 	return &b.DataFiles[len(b.DataFiles)-1]
+}
+
+// GetStorageTime checks how many points fit into the same file as the first point
+// returns the number of points that fit and the time at which the file starts
+func (b Bucket) GetStorageTime(time []int64) (*DataFile, int) {
+	// find data file
+	dataFile := b.createDataFile(time[0])
+
+	// find all points that fit into this file
+	for i, t := range time {
+		if t > dataFile.TimeEnd {
+			return dataFile, i
+		}
+	}
+
+	return dataFile, len(time)
 }
 
 func (b *Bucket) WriteBlock(fileTime int64, buffer bytes.Buffer, overwrite bool) error {
 	dataFile := b.createDataFile(fileTime)
 
 	return dataFile.WriteBlock(buffer, overwrite)
-}
-
-// WriteData tries to write as many points from the buffer into the bucket, returns the header of the block written or an error
-func (b *Bucket) WriteData(buffer PointBuffer, transformers []encoding.Transformer, overwrite bool) (encoding.BlockHeader, error) {
-	count := buffer.Len()
-	if count == 0 {
-		return encoding.BlockHeader{}, nil
-	}
-
-	// find data file
-	dataFile := b.createDataFile(buffer.Time[0])
-
-	// find all points that fit into this file
-	for i, t := range buffer.Time {
-		if t > dataFile.TimeEnd {
-			count = i
-			break
-		}
-	}
-
-	// transform values
-	var err error
-	transformed := make([][]uint64, len(transformers)+1)
-
-	transformed[0], err = encoding.TimeTransformer.Apply(buffer.Time[:count])
-	if err != nil {
-		return encoding.BlockHeader{}, err
-	}
-
-	for i, t := range transformers {
-		transformed[i+1], err = t.Apply(buffer.Values[i][:count])
-		if err != nil {
-			return encoding.BlockHeader{}, err
-		}
-	}
-
-	// encode values
-	var block bytes.Buffer
-	header, err := encoding.EncodeBlock(&block, s.Buffer.Time[:count], transformed)
-
-	if err != nil {
-		return encoding.BlockHeader{}, err
-	}
-
-	// write transformed values to file
-	err = dataFile.WriteBlock(block, overwrite)
-
-	return header, nil
 }

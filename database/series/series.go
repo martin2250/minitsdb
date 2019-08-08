@@ -6,10 +6,7 @@ import (
 	"fmt"
 	"github.com/martin2250/minitsdb/database/series/storage"
 	"github.com/martin2250/minitsdb/database/series/storage/encoding"
-	"io"
 	"math"
-	"path"
-	"strconv"
 	"time"
 
 	"github.com/martin2250/minitsdb/ingest"
@@ -31,10 +28,11 @@ type Series struct {
 	OverwriteLast bool // data buffer contains last block on disk, overwrite
 	Path          string
 	Columns       []Column
-	Buckets       []storage.Bucket
+	FirstBucket   storage.Bucket
+	LastBuckets   []storage.Bucket
 
-	// transformers used for the first bucket
-	TransformersFirst []encoding.Transformer
+	// LastFlush   time.Time
+	OldestValue int64
 
 	Tags       map[string]string
 	FlushDelay time.Duration
@@ -103,8 +101,12 @@ func (s *Series) InsertPoint(p storage.Point) error {
 	}
 
 	// check if points time is already archived
-	if p.Time <= s.Buckets[0].TimeLast {
+	if p.Time <= s.FirstBucket.TimeLast {
 		return ErrInsertAtEnd
+	}
+
+	if p.Time < s.OldestValue {
+		s.OldestValue = p.Time
 	}
 
 	s.Buffer.InsertPoint(p)
@@ -154,12 +156,13 @@ func OpenSeries(seriespath string) (Series, error) {
 
 	// create series struct
 	s := Series{
-		FlushDelay: conf.FlushDelay,
-		BufferSize: conf.Buffer,
-		ReuseMax:   conf.ReuseMax,
-		Columns:    make([]Column, 0),
-		Buckets:    make([]storage.Bucket, len(conf.Buckets)),
-		Tags:       conf.Tags,
+		FlushDelay:  conf.FlushDelay,
+		BufferSize:  conf.Buffer,
+		ReuseMax:    conf.ReuseMax,
+		Columns:     make([]Column, 0),
+		LastBuckets: make([]storage.Bucket, len(conf.Buckets)-1),
+		Tags:        conf.Tags,
+		OldestValue: math.MaxInt64,
 
 		Path: seriespath,
 	}
@@ -224,20 +227,16 @@ func OpenSeries(seriespath string) (Series, error) {
 	for i, bc := range conf.Buckets {
 		timeStep *= int64(bc.Factor)
 
-		s.Buckets[i] = storage.Bucket{
-			TimeLast:       math.MinInt64,
-			TimeResolution: timeStep,
-			PointsPerFile:  conf.PointsFile,
-			First:          i == 0,
-			Path:           path.Join(s.Path, strconv.FormatInt(timeStep, 10)),
-		}
-
-		err = s.Buckets[i].Init()
+		s.LastBuckets[i], err = storage.OpenBucket(s.Path, timeStep, conf.PointsFile)
 
 		if err != nil {
 			return Series{}, err
 		}
 	}
+
+	// split away first bucket
+	s.FirstBucket = s.LastBuckets[0]
+	s.LastBuckets = s.LastBuckets[1:]
 
 	// create top level value array
 	s.Buffer = storage.NewPointBuffer(len(s.Columns))
@@ -255,14 +254,12 @@ func OpenSeries(seriespath string) (Series, error) {
 // checkFirstBucket checks the last block in the first bucket for free space according to ReuseMax
 // errors are to be treated as fatal
 func (s *Series) checkFirstBucket() error {
-	b := &s.Buckets[0]
-
-	// read last block from file
-	buf, err := b.getLastBlock()
-
-	if err == io.EOF {
+	if len(s.FirstBucket.DataFiles) == 0 {
 		return nil
 	}
+	// read last block from file
+	dataFile := s.FirstBucket.DataFiles[len(s.FirstBucket.DataFiles)-1]
+	buf, err := dataFile.ReadBlock(dataFile.Blocks - 1)
 
 	if err != nil {
 		return err
@@ -335,6 +332,12 @@ func (s *Series) CheckFlush() bool {
 // copy arrays to allow GC to work
 func (s *Series) Discard(n int) {
 	s.Buffer.Discard(n)
+
+	if s.Buffer.Len() == 0 {
+		s.OldestValue = math.MaxInt64
+	} else {
+		s.OldestValue = s.Buffer.Time[0]
+	}
 }
 
 // SaveDiscard saves n values to a recovery file and then calls discard
@@ -348,16 +351,53 @@ func (s *Series) SaveDiscard(n int) {
 // todo: b) or a configurable maximum amount of values is in the buffer
 // Flush does not return an error, errors are handled by the function itself
 func (s *Series) Flush() {
-	fmt.Printf("flushing series %v with %d points\n", s.Tags, s.Buffer.Len())
-
-	header, err := s.Buckets[0].WriteData(s.Buffer, s.OverwriteLast)
-
-	if err != nil {
-		fmt.Printf("error while flushing series %v: %s, storing all values in recovery file", s.Tags, err.Error())
-		s.SaveDiscard(s.Buffer.Len())
+	if s.Buffer.Len() == 0 {
+		return
 	}
 
-	//todo: move encoding etc. back out of bucket, bucket should only know uint64
+	fmt.Printf("flushing series %v with %d points\n", s.Tags, s.Buffer.Len())
+
+	// check file boundaries
+	dataFile, count := s.FirstBucket.GetStorageTime(s.Buffer.Time)
+
+	// transform values
+	var err error
+	transformed := make([][]uint64, len(s.Columns)+1)
+
+	transformed[0], err = encoding.TimeTransformer.Apply(s.Buffer.Time[:count])
+	if err != nil {
+		fmt.Printf("ERROR while transforming time for series %v %s\n", s.Tags, err.Error())
+		s.SaveDiscard(count) // todo: log this properly
+		return
+	}
+
+	for i := range s.Columns {
+		transformed[i+1], err = s.Columns[i].Transformer.Apply(s.Buffer.Values[i][:count])
+		if err != nil {
+			fmt.Printf("ERROR while transforming values for series %v %s\n", s.Tags, err.Error())
+			s.SaveDiscard(count) // todo: log this properly
+			return
+		}
+	}
+
+	// encode values
+	var block bytes.Buffer
+	header, err := encoding.EncodeBlock(&block, s.Buffer.Time[:count], transformed)
+
+	if err != nil {
+		s.SaveDiscard(count) // todo: log this properly
+		fmt.Printf("ERROR while encoding values for series %v %s\n", s.Tags, err.Error())
+		return
+	}
+
+	// write transformed values to file
+	err = dataFile.WriteBlock(block, s.OverwriteLast)
+
+	if err != nil {
+		s.SaveDiscard(header.NumPoints) // todo: log this properly
+		fmt.Printf("ERROR while encoding values for series %v %s\n", s.Tags, err.Error())
+		return
+	}
 
 	fmt.Printf("wrote %d points to file, block size %d bytes", header.NumPoints, header.BytesUsed)
 
@@ -366,6 +406,7 @@ func (s *Series) Flush() {
 		s.OverwriteLast = true
 		fmt.Println(", reusing buffer")
 	} else {
+		s.FirstBucket.TimeLast = s.Buffer.Time[count-1]
 		s.OverwriteLast = false
 		s.Discard(header.NumPoints)
 		fmt.Println(", flushing buffer")

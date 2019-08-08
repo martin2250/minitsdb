@@ -138,7 +138,7 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 
 		// read points into output array
 		var pointsRead int
-		for pointsRead < int(d.Header.NumPoints) {
+		for pointsRead < d.Header.NumPoints {
 			// check if there are words left in this block
 			if wordsLeft == 0 {
 				d.s = stateError
