@@ -1,7 +1,6 @@
 package query
 
 import (
-	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/database/series/storage"
 	"github.com/martin2250/minitsdb/database/series/storage/encoding"
 	"github.com/martin2250/minitsdb/util"
@@ -13,13 +12,22 @@ import (
 // FirstPointSource reads and aggregates points from the first bucket of a series and RAM
 // this is separate from highpointsource (needs renaming even more than this), as both the first bucket and ram don't have pre-downsampled values
 type FirstPointSource struct {
-	series *series.Series
-	params *Parameters
-	buffer storage.PointBuffer
-	reader encoding.FileDecoder
+	params       *Parameters
+	buffer       storage.PointBuffer
+	reader       encoding.FileDecoder
+	rambuffer    storage.PointBuffer
+	transformers []encoding.Transformer
 }
 
 func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
+	if s.params == nil {
+		return storage.PointBuffer{}, io.EOF
+	}
+
+	// isEOF is set when the reader returned no new values
+	// if this flag is true, the points from the ram buffer are added to the buffer
+	var isEOF = false
+
 	// read header and find first block that contains points within query range
 	header := encoding.BlockHeader{
 		TimeLast: math.MinInt64,
@@ -29,51 +37,49 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 		var err error
 		header, err = s.reader.DecodeHeader()
 
-		if err != nil {
+		if err == io.EOF || header.TimeFirst > s.params.TimeEnd {
+			isEOF = true
+			break
+		} else if err != nil {
 			return storage.PointBuffer{}, err
 		}
-
-		if header.TimeFirst > s.params.TimeEnd {
-			return storage.PointBuffer{}, io.EOF
-		}
 	}
+
 	// read block from reader
-	decoded, err := s.reader.DecodeBlock()
-
-	// check for EOF seperately
-	var isEOF = false
-
-	if err == io.EOF {
-		isEOF = true
-	} else if err != nil {
-		return storage.PointBuffer{}, err
-	}
-
 	if !isEOF {
-		// append values to buffer
-		timeNew, err := encoding.TimeTransformer.Revert(decoded[0])
-		if err != nil {
-			return storage.PointBuffer{}, err
-		}
-		s.buffer.Time = append(s.buffer.Time, timeNew...)
+		decoded, err := s.reader.DecodeBlock()
 
-		valuesNew := make([][]int64, len(s.params.Columns))
-		for i, d := range decoded[1:] {
-			valuesNew[i], err = s.series.Columns[s.params.Columns[i].Index].Transformer.Revert(d)
+		if err == io.EOF {
+			isEOF = true
+		} else if err != nil {
+			return storage.PointBuffer{}, err
+		} else {
+			// append values to buffer
+			timeNew, err := encoding.TimeTransformer.Revert(decoded[0])
 			if err != nil {
 				return storage.PointBuffer{}, err
 			}
-		}
 
-		s.buffer.AppendBuffer(storage.PointBuffer{
-			Time:   timeNew,
-			Values: valuesNew,
-		})
-	} else {
+			valuesNew := make([][]int64, len(s.params.Columns))
+			for i, d := range decoded[1:] {
+				valuesNew[i], err = s.transformers[i].Revert(d)
+				if err != nil {
+					return storage.PointBuffer{}, err
+				}
+			}
+
+			s.buffer.AppendBuffer(storage.PointBuffer{
+				Time:   timeNew,
+				Values: valuesNew,
+			})
+		}
+	}
+
+	if isEOF {
 		// append RAM values if bucket reader is at end
 		// loop over all points in RAM
-		for i := range s.series.Buffer.Time {
-			s.buffer.InsertPoint(s.series.Buffer.At(i))
+		for i := range s.rambuffer.Time {
+			s.buffer.InsertPoint(s.rambuffer.At(i))
 		}
 	}
 
@@ -146,30 +152,23 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 	}
 
 	if isEOF {
-		return output, io.EOF
-	} else {
-		return output, nil
+		s.params = nil
 	}
+
+	return output, nil
 }
 
 // NewFirstPointSource creates a new fps and initializes the bucket reader
 // valuesRAM: points that are stored in series.Values
 // params.TimeStart gets adjusted to reflect the values already read
-func NewFirstPointSource(s *series.Series, params *Parameters) FirstPointSource {
-	b := s.Buckets[0]
-	// create list of relevant files in first bucket
-	files := make([]string, 0, len(b.DataFiles))
+func NewFirstPointSource(files []storage.DataFile, params *Parameters, rambuffer storage.PointBuffer, transformers []encoding.Transformer) FirstPointSource {
+	// create list of relevant files
+	filesRange := make([]string, 0, 8)
 
-	for time, file := range b.DataFiles {
-		// check file ends before query start
-		if time+b.TimeResolution*(int64(b.PointsPerFile)-1) < params.TimeStart {
-			continue
+	for _, file := range files {
+		if file.TimeEnd >= params.TimeStart || file.TimeStart >= params.TimeEnd {
+			filesRange = append(filesRange, file.Path)
 		}
-		// check if file begins after query end
-		if time > params.TimeEnd {
-			continue
-		}
-		files = append(files, file.Path)
 	}
 
 	// create column indices for decoder
@@ -188,10 +187,11 @@ func NewFirstPointSource(s *series.Series, params *Parameters) FirstPointSource 
 
 	// create point source struct
 	src := FirstPointSource{
-		series: s,
-		buffer: storage.NewPointBuffer(len(params.Columns)),
-		params: params,
-		reader: encoding.NewFileDecoder(files, colIndices),
+		buffer:       storage.NewPointBuffer(len(params.Columns)),
+		params:       params,
+		reader:       encoding.NewFileDecoder(filesRange, colIndices),
+		rambuffer:    rambuffer,
+		transformers: transformers,
 	}
 
 	return src

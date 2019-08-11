@@ -1,4 +1,4 @@
-package series
+package query
 
 type DownSamplingType int
 

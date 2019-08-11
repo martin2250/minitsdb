@@ -7,7 +7,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-type yamlQueryParameters struct {
+type QueryParameters struct {
 	Series  map[string]string
 	Columns []map[string]string
 
@@ -23,11 +23,11 @@ type yamlQueryParameters struct {
 	Points int
 }
 
-func parseQuery(r io.Reader) (yamlQueryParameters, error) {
+func ParseQuery(r io.Reader) (QueryParameters, error) {
 	d := yaml.NewDecoder(r)
 	d.SetStrict(true)
 
-	c := yamlQueryParameters{
+	c := QueryParameters{
 		LimitSeries: 1000,
 		Resolution:  -1,
 		Points:      -1,
@@ -36,13 +36,13 @@ func parseQuery(r io.Reader) (yamlQueryParameters, error) {
 	err := d.Decode(&c)
 
 	if err != nil {
-		return yamlQueryParameters{}, err
+		return QueryParameters{}, err
 	}
 
 	err = c.Check()
 
 	if err != nil {
-		return yamlQueryParameters{}, err
+		return QueryParameters{}, err
 	}
 
 	// todo: move this into API, add optional limit to number of points
@@ -56,7 +56,7 @@ func parseQuery(r io.Reader) (yamlQueryParameters, error) {
 	return c, nil
 }
 
-func (p yamlQueryParameters) Check() error {
+func (p QueryParameters) Check() error {
 	if p.Series == nil || len(p.Series) < 1 {
 		return errors.New("series description missing")
 	}

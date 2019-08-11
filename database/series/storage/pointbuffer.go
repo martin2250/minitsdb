@@ -81,7 +81,7 @@ func (b PointBuffer) At(index int) Point {
 		Values: make([]int64, len(b.Values)),
 	}
 	for i := range b.Values {
-		p.Values[i] = b.Values[index][i]
+		p.Values[i] = b.Values[i][index]
 	}
 	return p
 }

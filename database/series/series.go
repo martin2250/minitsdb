@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/martin2250/minitsdb/database/series/query"
 	"github.com/martin2250/minitsdb/database/series/storage"
 	"github.com/martin2250/minitsdb/database/series/storage/encoding"
 	"math"
@@ -160,7 +161,7 @@ func OpenSeries(seriespath string) (Series, error) {
 		BufferSize:  conf.Buffer,
 		ReuseMax:    conf.ReuseMax,
 		Columns:     make([]Column, 0),
-		LastBuckets: make([]storage.Bucket, len(conf.Buckets)-1),
+		LastBuckets: make([]storage.Bucket, len(conf.Buckets)),
 		Tags:        conf.Tags,
 		OldestValue: math.MaxInt64,
 
@@ -402,7 +403,8 @@ func (s *Series) Flush() {
 	fmt.Printf("wrote %d points to file, block size %d bytes", header.NumPoints, header.BytesUsed)
 
 	// don't discard points if we can reuse the block
-	if header.NumPoints == s.Buffer.Len() && header.BytesUsed < s.ReuseMax {
+	// todo: fix overwriting, right now it seems to always append to the file
+	if false && header.NumPoints == s.Buffer.Len() && header.BytesUsed < s.ReuseMax {
 		s.OverwriteLast = true
 		fmt.Println(", reusing buffer")
 	} else {
@@ -411,4 +413,41 @@ func (s *Series) Flush() {
 		s.Discard(header.NumPoints)
 		fmt.Println(", flushing buffer")
 	}
+}
+
+func (s *Series) Query(params query.Parameters) *query.Query {
+	// adjust param time step to be an integer multiple of a bucket time step
+	if params.TimeStep < 1 {
+		params.TimeStep = 1
+	}
+
+	params.TimeStep = util.RoundUp(params.TimeStep, s.FirstBucket.TimeResolution)
+
+	for _, bucket := range s.LastBuckets {
+		if bucket.TimeResolution <= params.TimeStep {
+			params.TimeStep = util.RoundUp(params.TimeStep, bucket.TimeResolution)
+		}
+	}
+
+	// create query object
+	q := &query.Query{
+		Param:   params,
+		Sources: make([]query.PointSource, 0, 1),
+	}
+
+	// create first point source
+	// todo: add sources for other buckets
+	fpsRamValues := storage.NewPointBuffer(len(params.Columns))
+	fpsTransformers := make([]encoding.Transformer, len(params.Columns))
+
+	fpsRamValues.Time = s.Buffer.Time
+	for i, col := range params.Columns {
+		fpsRamValues.Values[i] = s.Buffer.Values[col.Index]
+		fpsTransformers[i] = s.Columns[col.Index].Transformer
+	}
+
+	fps := query.NewFirstPointSource(s.FirstBucket.DataFiles, &q.Param, fpsRamValues, fpsTransformers)
+	q.Sources = append(q.Sources, &fps)
+
+	return q
 }

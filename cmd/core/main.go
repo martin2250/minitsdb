@@ -1,28 +1,39 @@
 package main
 
 import (
-	"fmt"
-	"github.com/martin2250/minitsdb/api"
+	"github.com/gorilla/mux"
+	"github.com/jessevdk/go-flags"
+	"github.com/martin2250/minitsdb/api/grafanaapi"
 	"github.com/martin2250/minitsdb/database"
 	"github.com/martin2250/minitsdb/ingest"
 	"github.com/martin2250/minitsdb/ingest/pointlistener"
-	"io"
-	"log"
+	log "github.com/sirupsen/logrus"
 	"net/http"
 	_ "net/http/pprof"
-	"runtime"
-	"strconv"
 	"time"
 )
 
 func main() {
-	db, err := database.NewDatabase("/home/martin/Desktop/minitsdb_database")
+	opts := struct {
+		DbPath string `short:"d" long:"database" description:"database path"`
+	}{
+		DbPath: "/home/martin/Desktop/minitsdb_database",
+	}
+	_, err := flags.Parse(&opts)
 
 	if err != nil {
-		panic(err)
+		return
 	}
 
-	//buffer := ingest.NewPointList()
+	// load database
+	log.WithField("path", opts.DbPath).Info("Loading database")
+	db, err := database.NewDatabase(opts.DbPath)
+
+	if err != nil {
+		log.WithField("error", err.Error()).Fatal("Failed to load database")
+	}
+
+	// set up ingestion
 	buffer := ingest.NewPointFifo()
 
 	tcpl := pointlistener.TCPLineProtocolListener{
@@ -31,16 +42,29 @@ func main() {
 
 	go tcpl.Listen(8001)
 
+	r := mux.NewRouter()
+	api := r.PathPrefix("/api/").Subrouter()
+
+	srv := &http.Server{
+		Addr:         "0.0.0.0:8080",
+		WriteTimeout: time.Second * 15,
+		ReadTimeout:  time.Second * 15,
+		IdleTimeout:  time.Second * 60,
+		Handler:      r,
+	}
+
 	httpl := pointlistener.HTTPLineProtocolHandler{
 		Sink: &buffer,
 	}
-	http.Handle("/insert", httpl)
+	api.Handle("/insert", httpl)
 
-	api := api.NewDatabaseAPI(&db)
+	grafanaapi.Register(&db, api)
 
-	http.Handle("/query/", api)
+	//api := api.NewDatabaseAPI(&db)
+	//
+	//http.Handle("/query/", api)
 
-	go http.ListenAndServe(":8080", nil)
+	go srv.ListenAndServe()
 
 	for {
 		// read point
@@ -55,32 +79,23 @@ func main() {
 		}
 
 		// serve query
-		q, ok2 := api.GetQuery()
+		//q, ok2 := api.GetQuery()
+		//
+		//if ok2 {
+		//	runtime.GC()
+		//	for {
+		//		vals, err := q.Query.ReadNext()
+		//
+		//		if err == nil {
+		//			q.Data <- vals
+		//		} else {
+		//			break
+		//		}
+		//	}
+		//	close(q.Data)
+		//}
 
-		if ok2 {
-			runtime.GC()
-			q.Writer.Write([]byte("starting processing"))
-			for {
-				vals, err := q.ReadNext()
-
-				if err == nil {
-					for i := range vals.Time {
-						io.WriteString(q.Writer, strconv.FormatInt(vals.Time[i], 10))
-						for j := range q.Param.Columns {
-							q.Writer.Write([]byte{0x20}) // spaaaaaacee!
-							io.WriteString(q.Writer, strconv.FormatInt(vals.Values[j][i], 10))
-						}
-						q.Writer.Write([]byte{0x0A}) // newline
-					}
-				} else {
-					fmt.Fprint(q.Writer, err)
-					break
-				}
-			}
-			q.Done <- struct{}{}
-		}
-
-		if !ok1 && !ok2 {
+		if !ok1 /*&& !ok2*/ {
 			time.Sleep(time.Millisecond)
 		}
 	}

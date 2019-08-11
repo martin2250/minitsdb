@@ -33,18 +33,21 @@ func (d *FileDecoder) nextFile() error {
 }
 
 func (d *FileDecoder) DecodeHeader() (BlockHeader, error) {
-	if d.currentFile == nil {
-		err := d.nextFile()
-		if err != nil {
-			return BlockHeader{}, err
+	for len(d.files) > 0 || d.currentFile != nil {
+		if d.currentFile == nil {
+			err := d.nextFile()
+			if err != nil {
+				return BlockHeader{}, err
+			}
 		}
-	}
 
-	for len(d.files) > 0 {
 		header, err := d.decoder.DecodeHeader()
+
 		switch {
 		case err == nil:
 			return header, nil
+		case err == io.EOF:
+			d.Close()
 		case err != io.EOF:
 			return BlockHeader{}, err
 		}

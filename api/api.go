@@ -1,12 +1,12 @@
 package api
 
 import (
-	"fmt"
-	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/database/series/query"
+	"github.com/martin2250/minitsdb/database/series/storage"
+	"io"
 	"log"
 	"net/http"
-	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +21,11 @@ type DatabaseAPI struct {
 	database *database.Database
 }
 
+type HTTPQuery struct {
+	Query *query.Query
+	Data  chan storage.PointBuffer
+}
+
 func NewDatabaseAPI(db *database.Database) DatabaseAPI {
 	return DatabaseAPI{
 		queries:  fifo.NewQueue(),
@@ -29,23 +34,23 @@ func NewDatabaseAPI(db *database.Database) DatabaseAPI {
 }
 
 //AddQuery enqueues a query to be executed on the next query cycle
-func (api DatabaseAPI) AddQuery(q query.Query) {
+func (api DatabaseAPI) AddQuery(q HTTPQuery) {
 	api.queries.Add(q)
 }
 
 //GetQuery returns the oldest query from the query buffer
 //returns false if no query is available
-func (api DatabaseAPI) GetQuery() (query.Query, bool) {
+func (api DatabaseAPI) GetQuery() (HTTPQuery, bool) {
 	queryi := api.queries.Next()
 
 	if queryi == nil {
-		return query.Query{}, false
+		return HTTPQuery{}, false
 	}
 
-	q, ok := queryi.(query.Query)
+	q, ok := queryi.(HTTPQuery)
 
 	if !ok {
-		return query.Query{}, false
+		return HTTPQuery{}, false
 	}
 
 	return q, true
@@ -60,7 +65,7 @@ func (api DatabaseAPI) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 	}
 
 	// parse query
-	p, err := parseQuery(request.Body)
+	p, err := ParseQuery(request.Body)
 
 	if err != nil {
 		http.Error(writer, "can't parse query", http.StatusBadRequest)
@@ -90,29 +95,50 @@ func (api DatabaseAPI) ServeHTTP(writer http.ResponseWriter, request *http.Reque
 			psers := param
 
 			for _, colspec := range p.Columns {
-				cols := api.database.Series[i].GetIndices(colspec)
+				cols := i.GetIndices(colspec)
 				for _, index := range cols {
 					psers.Columns = append(psers.Columns, query.Column{
 						Index:       index,
-						Downsampler: series.DownsamplerMean,
+						Downsampler: query.DownsamplerMean,
 					})
 				}
 			}
 
-			query := query.NewQuery(&api.database.Series[i], psers, writer)
+			query := i.Query(psers)
 
-			query.Done = make(chan struct{})
-
-			api.queries.Add(query)
-
-			writer.Write([]byte("test\n"))
-
-			select {
-			case <-time.After(60 * time.Second):
-				writer.Write([]byte("timeout, motherfucker!\n"))
-			case <-query.Done:
-				fmt.Fprint(os.Stderr, "done\n")
+			httpQuery := HTTPQuery{
+				Query: query,
+				Data:  make(chan storage.PointBuffer, 16),
 			}
+
+			api.AddQuery(httpQuery)
+
+			timeout := time.After(5 * 60 * time.Second)
+
+		WriteLoop:
+			for {
+				select {
+				case <-timeout:
+					writer.Write([]byte("timeout, motherfucker!\n"))
+					break WriteLoop
+				case buffer, ok := <-httpQuery.Data:
+					{
+						if !ok {
+							break WriteLoop
+						}
+						for i := range buffer.Time {
+							io.WriteString(writer, strconv.FormatInt(buffer.Time[i], 10))
+							for j := range query.Param.Columns {
+								writer.Write([]byte{0x20}) // spaaaaaacee!
+								io.WriteString(writer, strconv.FormatInt(buffer.Values[j][i], 10))
+							}
+							writer.Write([]byte{0x0A}) // newline
+						}
+					}
+				}
+			}
+
+			writer.Write([]byte("END"))
 		}
 		return
 	} else if strings.HasPrefix(request.URL.Path, "/query/binary") {
