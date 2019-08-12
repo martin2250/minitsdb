@@ -16,6 +16,6 @@ type ExecutorAdder interface {
 func Register(db *database.Database, r *mux.Router, add ExecutorAdder) {
 	s := r.PathPrefix("/grafana/").Subrouter()
 	s.Handle("/test", handleTest{})
-	s.Handle("/query", handleQuery{db: db, add: add})
+	s.Handle("/query", newHandleQuery(db, add))
 	s.Handle("/list", handleList{db: db})
 }

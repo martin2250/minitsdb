@@ -25,6 +25,15 @@ type handleQuery struct {
 	mutRequests sync.Mutex
 }
 
+func newHandleQuery(db *database.Database, add ExecutorAdder) handleQuery {
+	return handleQuery{
+		db:          db,
+		add:         add,
+		requests:    make(map[seriesRequestParams]*seriesRequest),
+		mutRequests: sync.Mutex{},
+	}
+}
+
 type seriesRequestParams struct {
 	s *series.Series
 	// query params
@@ -242,9 +251,9 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					columnMaps[indexMatch][iQuery] = iReq
 					continue LoopMatchingColumns
 				}
-				columnMaps[indexMatch][iQuery] = len(h.requests[srp].columns)
-				h.requests[srp].columns = append(h.requests[srp].columns, colQuery)
 			}
+			columnMaps[indexMatch][iQuery] = len(h.requests[srp].columns)
+			h.requests[srp].columns = append(h.requests[srp].columns, colQuery)
 		}
 	}
 
@@ -274,9 +283,13 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			NumValues:   len(columnMaps[result.index]),
 		})
 
+		if len(result.data.Values) == 0 {
+			log.Printf("fuck")
+		}
+
 		if err != nil {
 			logHTTPError(w, r, err.Error(), http.StatusInternalServerError)
-			close(receiver)
+			//close(receiver)
 			return
 		}
 
@@ -284,7 +297,7 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if err != nil {
 			logHTTPError(w, r, err.Error(), http.StatusInternalServerError)
-			close(receiver)
+			//close(receiver)
 			return
 		}
 
@@ -294,7 +307,7 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			if err != nil {
 				logHTTPError(w, r, err.Error(), http.StatusInternalServerError)
-				close(receiver)
+				//close(receiver)
 				return
 			}
 		}
