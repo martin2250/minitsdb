@@ -10,6 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 	"net/http"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,8 +37,9 @@ type seriesRequestParams struct {
 // index is the index of the series within that request that was served
 // returning this with an empty data field
 type seriesRequestData struct {
-	data  storage.PointBuffer
+	data  *storage.PointBuffer
 	index int
+	err   error
 }
 
 // seriesRequestReceiver holds a channel for seriesRequestData and the index of the series that is serves within that request
@@ -45,20 +47,57 @@ type seriesRequestReceiver struct {
 	pipe  chan<- seriesRequestData
 	index int
 	// counts the number of active seriesRequests for this column, must be decremented atomically before seriesRequest is discarded
+	// todo: replace this with err EOF
 	activeCounter *int64
 }
 
 // seriesRequest groups multiple requests for the same series, time step and range
 // multiple such requests are grouped so that a dashboard load in grafana does not trigger mutliple queries to run at once
 type seriesRequest struct {
+	params seriesRequestParams
 	// the receivers
 	receivers []seriesRequestReceiver
 	// columns to be read (unordered)
 	columns []query.Column
 }
 
-func (r *seriesRequest) Execute() error {
+func (r *seriesRequest) sendToAll(d seriesRequestData) {
+	for _, recv := range r.receivers {
+		d.index = recv.index
+		recv.pipe <- d
+	}
+}
 
+func (r *seriesRequest) Execute() error {
+	log.WithFields(log.Fields{
+		"series":    r.params.s.Tags,
+		"start":     r.params.timeStart,
+		"end":       r.params.timeEnd,
+		"step":      r.params.timeStep,
+		"receivers": len(r.receivers),
+	}).Info("Executing series request")
+
+	sort.Slice(r.columns, func(i, j int) bool {
+		return r.columns[i].Index < r.columns[j].Index
+	})
+
+	// todo: really important: unscramble data again (aka provide a map to the receivers)
+
+	q := r.params.s.Query(query.Parameters{
+		TimeStep:  r.params.timeStep,
+		Columns:   r.columns,
+		TimeStart: r.params.timeStart,
+		TimeEnd:   r.params.timeEnd,
+	})
+
+	for {
+		buf, err := q.ReadNext()
+
+		r.sendToAll(seriesRequestData{
+			data: &buf,
+			err:  err,
+		})
+	}
 }
 
 func logHTTPError(w http.ResponseWriter, r *http.Request, error string, code int) {
@@ -171,6 +210,7 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// if none was found, create one
 		if !ok {
 			h.requests[srp] = &seriesRequest{
+				params:    srp,
 				receivers: make([]seriesRequestReceiver, 0, 1),
 				columns:   make([]query.Column, 0, len(columnsMatch)),
 			}

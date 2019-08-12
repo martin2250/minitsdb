@@ -1,6 +1,7 @@
 package main
 
 import (
+	fifo "github.com/foize/go.fifo"
 	"github.com/gorilla/mux"
 	"github.com/jessevdk/go-flags"
 	"github.com/martin2250/minitsdb/api/grafanaapi"
@@ -12,6 +13,39 @@ import (
 	_ "net/http/pprof"
 	"time"
 )
+
+type ExecutorQueque struct {
+	executors *fifo.Queue
+}
+
+func NewExecutorQueque() ExecutorQueque {
+	return ExecutorQueque{
+		executors: fifo.NewQueue(),
+	}
+}
+
+//AddQuery enqueues a query to be executed on the next query cycle
+func (q ExecutorQueque) Add(e grafanaapi.Executor) {
+	q.executors.Add(e)
+}
+
+//GetQuery returns the oldest query from the query buffer
+//returns false if no query is available
+func (q ExecutorQueque) Get() (grafanaapi.Executor, bool) {
+	ei := q.executors.Next()
+
+	if ei == nil {
+		return nil, false
+	}
+
+	e, ok := ei.(grafanaapi.Executor)
+
+	if !ok {
+		return nil, false
+	}
+
+	return e, true
+}
 
 func main() {
 	opts := struct {
@@ -58,7 +92,9 @@ func main() {
 	}
 	api.Handle("/insert", httpl)
 
-	grafanaapi.Register(&db, api)
+	gqueue := NewExecutorQueque()
+
+	grafanaapi.Register(&db, api, gqueue)
 
 	//api := api.NewDatabaseAPI(&db)
 	//
@@ -76,6 +112,11 @@ func main() {
 			if err != nil {
 				log.Println(err)
 			}
+		}
+
+		e, ok2 := gqueue.Get()
+		if ok2 {
+			e.Execute()
 		}
 
 		// serve query
