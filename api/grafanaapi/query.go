@@ -3,16 +3,17 @@ package grafanaapi
 import (
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"github.com/martin2250/minitsdb/database"
 	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/database/series/query"
 	"github.com/martin2250/minitsdb/database/series/storage"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
+	"io"
 	"net/http"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -70,20 +71,40 @@ type seriesRequest struct {
 	columns []query.Column
 }
 
-func (r *seriesRequest) sendToAll(d seriesRequestData) {
-	for _, recv := range r.receivers {
-		d.index = recv.index
-		recv.pipe <- d
+type seriesInfo struct {
+	Tags    map[string]string
+	Columns []map[string]string
+}
+
+func (r *seriesRequest) sendToAll(d seriesRequestData) bool {
+	n := 0
+
+	for i, recv := range r.receivers {
+		if recv.pipe != nil {
+			d.index = recv.index
+			select {
+			case recv.pipe <- d:
+				n += 1
+			case <-time.After(100 * time.Millisecond):
+				r.receivers[i].pipe = nil
+				log.WithFields(log.Fields{
+					"ptr": fmt.Sprintf("%p", r),
+				}).Error("receiver timeout")
+			}
+		}
 	}
+	return n != 0
 }
 
 func (r *seriesRequest) Execute() error {
 	log.WithFields(log.Fields{
+		"ptr":       fmt.Sprintf("%p", r),
 		"series":    r.params.s.Tags,
 		"start":     r.params.timeStart,
 		"end":       r.params.timeEnd,
 		"step":      r.params.timeStep,
 		"receivers": len(r.receivers),
+		"columns":   len(r.columns),
 	}).Info("Executing series request")
 
 	sort.Slice(r.columns, func(i, j int) bool {
@@ -102,10 +123,44 @@ func (r *seriesRequest) Execute() error {
 	for {
 		buf, err := q.ReadNext()
 
-		r.sendToAll(seriesRequestData{
-			data: &buf,
-			err:  err,
-		})
+		if err == nil && buf.Cols() != len(r.columns) {
+			log.WithFields(log.Fields{
+				"ptr":      fmt.Sprintf("%p", r),
+				"expected": len(r.columns),
+				"got":      buf.Cols(),
+			}).Error("number of columns read does not match")
+
+			return nil
+		}
+
+		if err != nil || buf.Len() > 0 {
+			anyReceivers := r.sendToAll(seriesRequestData{
+				data: &buf,
+				err:  err,
+			})
+
+			if !anyReceivers {
+				log.WithFields(log.Fields{
+					"ptr": fmt.Sprintf("%p", r),
+				}).Info("all receivers closed")
+
+				return err
+			}
+		}
+
+		if err != nil {
+			if err == io.EOF {
+				log.WithFields(log.Fields{
+					"ptr": fmt.Sprintf("%p", r),
+				}).Info("Finished series request")
+			} else {
+				log.WithFields(log.Fields{
+					"ptr": fmt.Sprintf("%p", r),
+				}).Warn(err.Error())
+			}
+
+			return err
+		}
 	}
 }
 
@@ -130,6 +185,7 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		TimeStep  time.Duration
 		TimeStart int64
 		TimeEnd   int64
+		Wait      bool
 	}{}
 
 	err := yaml.NewDecoder(r.Body).Decode(&par)
@@ -202,7 +258,6 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// register query for every matching series
 	receiver := make(chan seriesRequestData, 16)
 	columnMaps := make([][]int, len(matches))
-	numActiveRequests := int64(len(matches))
 
 	h.mutRequests.Lock()
 
@@ -214,46 +269,52 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			timeStart: par.TimeStart,
 			timeEnd:   par.TimeEnd,
 		}
-		_, ok := h.requests[srp]
+		request, ok := h.requests[srp]
 
 		// if none was found, create one
 		if !ok {
-			h.requests[srp] = &seriesRequest{
+			request = &seriesRequest{
 				params:    srp,
 				receivers: make([]seriesRequestReceiver, 0, 1),
 				columns:   make([]query.Column, 0, len(columnsMatch)),
 			}
 
-			// after x time, actually let the main goroutine execute the query
-			time.AfterFunc(100*time.Millisecond, func() {
-				h.mutRequests.Lock()
-				sr := h.requests[srp]
-				delete(h.requests, srp)
-				h.mutRequests.Unlock()
+			if par.Wait {
+				h.requests[srp] = request
+				// after x time, actually let the main goroutine execute the query
+				time.AfterFunc(100*time.Millisecond, func() {
+					h.mutRequests.Lock()
+					sr := h.requests[srp]
+					delete(h.requests, srp)
+					h.mutRequests.Unlock()
 
-				h.add.Add(sr)
-			})
+					h.add.Add(sr)
+				})
+			}
 		}
 
 		// add pipe to seriesRequest receiver
-		h.requests[srp].receivers = append(h.requests[srp].receivers, seriesRequestReceiver{
-			pipe:          receiver,
-			index:         indexMatch,
-			activeCounter: &numActiveRequests,
+		request.receivers = append(request.receivers, seriesRequestReceiver{
+			pipe:  receiver,
+			index: indexMatch,
 		})
 
 		// map query columns to columns of the seriesRequest
 		columnMaps[indexMatch] = make([]int, len(columnsMatch))
 	LoopMatchingColumns:
 		for iQuery, colQuery := range columnsMatch {
-			for iReq, colReq := range h.requests[srp].columns {
+			for iReq, colReq := range request.columns {
 				if colQuery.Downsampler == colReq.Downsampler && colQuery.Index == colReq.Index {
 					columnMaps[indexMatch][iQuery] = iReq
 					continue LoopMatchingColumns
 				}
 			}
-			columnMaps[indexMatch][iQuery] = len(h.requests[srp].columns)
-			h.requests[srp].columns = append(h.requests[srp].columns, colQuery)
+			columnMaps[indexMatch][iQuery] = len(request.columns)
+			request.columns = append(request.columns, colQuery)
+		}
+
+		if !ok && !par.Wait {
+			h.add.Add(request)
 		}
 	}
 
@@ -263,14 +324,32 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 
 	// send information about the series that follow
-	tagsets := make([]map[string]string, len(matches))
+	tagsets := make([]seriesInfo, len(matches))
 	for i, m := range matches {
-		tagsets[i] = m.Tags
+		tagsets[i].Tags = m.Tags
+		for _, col := range queryColumns[i] {
+			tagsets[i].Columns = append(tagsets[i].Columns, m.Columns[col.Index].Tags)
+		}
 	}
-	enc.Encode(tagsets)
+	err = enc.Encode(tagsets)
 
-	for atomic.LoadInt64(&numActiveRequests) > 0 {
+	if err != nil {
+		logHTTPError(w, r, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	numActiveRequests := int64(len(matches))
+
+	for numActiveRequests > 0 {
 		result := <-receiver
+
+		if result.err == io.EOF {
+			numActiveRequests -= 1
+			continue
+		} else if result.err != nil {
+			logHTTPError(w, r, result.err.Error(), http.StatusNotFound)
+			return
+		}
 
 		// execute queries on different series in parallel, interleave results as they come in
 		err := enc.Encode(struct {
@@ -283,13 +362,8 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			NumValues:   len(columnMaps[result.index]),
 		})
 
-		if len(result.data.Values) == 0 {
-			log.Printf("fuck")
-		}
-
 		if err != nil {
 			logHTTPError(w, r, err.Error(), http.StatusInternalServerError)
-			//close(receiver)
 			return
 		}
 
@@ -297,7 +371,6 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if err != nil {
 			logHTTPError(w, r, err.Error(), http.StatusInternalServerError)
-			//close(receiver)
 			return
 		}
 
@@ -307,9 +380,10 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			if err != nil {
 				logHTTPError(w, r, err.Error(), http.StatusInternalServerError)
-				//close(receiver)
 				return
 			}
 		}
 	}
+
+	log.Info("Completed API request")
 }

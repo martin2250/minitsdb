@@ -11,6 +11,10 @@ import (
 	log "github.com/sirupsen/logrus"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 )
 
@@ -59,6 +63,20 @@ func main() {
 		return
 	}
 
+	// add shutdown handler
+	sigs := make(chan os.Signal)
+	shutdown := make(chan bool)
+
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+		shutdown <- true
+		log.Info("Received signal to shutdown")
+		// force after timeout
+		time.Sleep(300 * time.Millisecond)
+	}()
+
 	// load database
 	log.WithField("path", opts.DbPath).Info("Loading database")
 	db, err := database.NewDatabase(opts.DbPath)
@@ -102,42 +120,51 @@ func main() {
 
 	go srv.ListenAndServe()
 
+LoopMain:
 	for {
-		// read point
-		point, ok1 := buffer.GetPoint()
-
-		if ok1 {
+		// insert new points
+		for {
+			point, ok := buffer.GetPoint()
+			if !ok {
+				break
+			}
 			err = db.InsertPoint(point)
-
 			if err != nil {
 				log.Println(err)
 			}
 		}
 
-		e, ok2 := gqueue.Get()
-		if ok2 {
-			e.Execute()
+		// serve queries
+		if gqueue.executors.Len() > 0 {
+			// wait for more queries to arrive
+			// todo: improve this by checking if there are queries waiting in api
+			time.Sleep(10 * time.Millisecond)
+
+			// wait until all queries are finished but run them in parallel
+			var wg sync.WaitGroup
+			for {
+				e, ok := gqueue.Get()
+				if ok {
+					wg.Add(1)
+					go func() {
+						e.Execute()
+						wg.Done()
+					}()
+				}
+			}
+			wg.Wait()
 		}
 
-		// serve query
-		//q, ok2 := api.GetQuery()
-		//
-		//if ok2 {
-		//	runtime.GC()
-		//	for {
-		//		vals, err := q.Query.ReadNext()
-		//
-		//		if err == nil {
-		//			q.Data <- vals
-		//		} else {
-		//			break
-		//		}
-		//	}
-		//	close(q.Data)
-		//}
-
-		if !ok1 /*&& !ok2*/ {
-			time.Sleep(time.Millisecond)
+		select {
+		case <-time.Tick(1 * time.Millisecond):
+		case <-shutdown:
+			break LoopMain
 		}
+	}
+
+	log.Info("Flushing buffers")
+
+	for _, s := range db.Series {
+		s.Flush()
 	}
 }

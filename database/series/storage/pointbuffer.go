@@ -91,6 +91,11 @@ func (b PointBuffer) Len() int {
 	return len(b.Time)
 }
 
+// Len returns the number of columns in the buffer
+func (b PointBuffer) Cols() int {
+	return len(b.Values)
+}
+
 // Discard first n points from buffer
 func (b *PointBuffer) Discard(n int) {
 	if n > b.Len() {

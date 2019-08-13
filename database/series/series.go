@@ -352,7 +352,7 @@ func (s *Series) SaveDiscard(n int) {
 // todo: b) or a configurable maximum amount of values is in the buffer
 // Flush does not return an error, errors are handled by the function itself
 func (s *Series) Flush() {
-	if s.Buffer.Len() == 0 {
+	if s.Buffer.Len() == 0 || s.OldestValue == math.MaxInt64 {
 		return
 	}
 
@@ -423,11 +423,12 @@ func (s *Series) Query(params query.Parameters) *query.Query {
 
 	params.TimeStep = util.RoundUp(params.TimeStep, s.FirstBucket.TimeResolution)
 
-	for _, bucket := range s.LastBuckets {
-		if bucket.TimeResolution <= params.TimeStep {
-			params.TimeStep = util.RoundUp(params.TimeStep, bucket.TimeResolution)
-		}
-	}
+	// todo: REENABLE THIS WHEN LAST POINT SOURCES ADDED
+	//for _, bucket := range s.LastBuckets {
+	//	if bucket.TimeResolution <= params.TimeStep {
+	//		params.TimeStep = util.RoundUp(params.TimeStep, bucket.TimeResolution)
+	//	}
+	//}
 
 	// create query object
 	q := &query.Query{
@@ -446,7 +447,7 @@ func (s *Series) Query(params query.Parameters) *query.Query {
 		fpsTransformers[i] = s.Columns[col.Index].Transformer
 	}
 
-	fps := query.NewFirstPointSource(s.FirstBucket.DataFiles, &q.Param, fpsRamValues, fpsTransformers)
+	fps := query.NewFirstPointSource(s.FirstBucket.DataFiles, &q.Param, fpsRamValues, fpsTransformers, s.FirstBucket.TimeResolution)
 	q.Sources = append(q.Sources, &fps)
 
 	return q
