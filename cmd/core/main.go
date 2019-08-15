@@ -4,7 +4,7 @@ import (
 	fifo "github.com/foize/go.fifo"
 	"github.com/gorilla/mux"
 	"github.com/jessevdk/go-flags"
-	"github.com/martin2250/minitsdb/api/grafanaapi"
+	"github.com/martin2250/minitsdb/api"
 	"github.com/martin2250/minitsdb/database"
 	"github.com/martin2250/minitsdb/ingest"
 	"github.com/martin2250/minitsdb/ingest/pointlistener"
@@ -29,20 +29,20 @@ func NewExecutorQueque() ExecutorQueque {
 }
 
 //AddQuery enqueues a query to be executed on the next query cycle
-func (q ExecutorQueque) Add(e grafanaapi.Executor) {
+func (q ExecutorQueque) Add(e api.Executor) {
 	q.executors.Add(e)
 }
 
 //GetQuery returns the oldest query from the query buffer
 //returns false if no query is available
-func (q ExecutorQueque) Get() (grafanaapi.Executor, bool) {
+func (q ExecutorQueque) Get() (api.Executor, bool) {
 	ei := q.executors.Next()
 
 	if ei == nil {
 		return nil, false
 	}
 
-	e, ok := ei.(grafanaapi.Executor)
+	e, ok := ei.(api.Executor)
 
 	if !ok {
 		return nil, false
@@ -95,7 +95,7 @@ func main() {
 	go tcpl.Listen(8001)
 
 	r := mux.NewRouter()
-	api := r.PathPrefix("/api/").Subrouter()
+	routerApi := r.PathPrefix("/api/").Subrouter()
 
 	srv := &http.Server{
 		Addr: "0.0.0.0:8080",
@@ -108,11 +108,11 @@ func main() {
 	httpl := pointlistener.HTTPLineProtocolHandler{
 		Sink: &buffer,
 	}
-	api.Handle("/insert", httpl)
+	routerApi.Handle("/insert", httpl)
 
 	gqueue := NewExecutorQueque()
 
-	grafanaapi.Register(&db, api, gqueue)
+	api.Register(&db, routerApi, gqueue)
 
 	//api := api.NewDatabaseAPI(&db)
 	//
