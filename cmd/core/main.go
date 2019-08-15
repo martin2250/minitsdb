@@ -156,7 +156,7 @@ LoopMain:
 		}
 
 		select {
-		case <-time.Tick(1 * time.Millisecond):
+		case <-time.Tick(10 * time.Millisecond):
 		case <-shutdown:
 			break LoopMain
 		}

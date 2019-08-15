@@ -207,9 +207,11 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if par.TimeStep%time.Second != 0 || par.TimeStep < time.Second {
-		logHTTPError(w, r, "time step must be a positive integer multiple of 1s", http.StatusBadRequest)
-		return
+	par.TimeStep = (par.TimeStep / time.Second) * time.Second
+	if par.TimeStep < time.Second {
+		par.TimeStep = time.Second
+		//logHTTPError(w, r, "time step must be a positive integer multiple of 1s", http.StatusBadRequest)
+		//return
 	}
 
 	timeStep := int64(par.TimeStep / time.Second)
@@ -282,7 +284,7 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if par.Wait {
 				h.requests[srp] = request
 				// after x time, actually let the main goroutine execute the query
-				time.AfterFunc(100*time.Millisecond, func() {
+				time.AfterFunc(20*time.Millisecond, func() {
 					h.mutRequests.Lock()
 					sr := h.requests[srp]
 					delete(h.requests, srp)
@@ -367,7 +369,12 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		err = binary.Write(w, binary.LittleEndian, result.data.Time)
+		teimgrafana := make([]int64, result.data.Len())
+		for j := range teimgrafana {
+			// todo: find number of decimal places
+			teimgrafana[j] = result.data.Time[j] * 1000
+		}
+		err = binary.Write(w, binary.LittleEndian, teimgrafana)
 
 		if err != nil {
 			logHTTPError(w, r, err.Error(), http.StatusInternalServerError)
@@ -375,8 +382,12 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, i := range columnMaps[result.index] {
-			// todo: convert to float
-			err = binary.Write(w, binary.LittleEndian, result.data.Values[i])
+			valuesf := make([]float64, result.data.Len())
+			for j := range valuesf {
+				// todo: find number of decimal places
+				valuesf[j] = float64(result.data.Values[i][j])
+			}
+			err = binary.Write(w, binary.LittleEndian, valuesf)
 
 			if err != nil {
 				logHTTPError(w, r, err.Error(), http.StatusInternalServerError)
