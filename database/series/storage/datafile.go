@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"sync"
 )
 
 // DataFile represents a file in the bucket's database directory
@@ -21,6 +22,8 @@ type DataFile struct {
 	// TimeStart and TimeEnd hold the time range stored in this file
 	TimeStart int64
 	TimeEnd   int64
+	// don't read while writing (only lock while actually reading / writing a block, file may be opened by multiple workers at once)
+	Mut sync.RWMutex
 }
 
 // ReadBlock reads the n-th block of a file
@@ -37,9 +40,14 @@ func (f DataFile) ReadBlock(n int64) (bytes.Buffer, error) {
 		return bytes.Buffer{}, err
 	}
 
-	return util.ReadBlock(file)
+	f.Mut.Lock()
+	buf, err := util.ReadBlock(file)
+	f.Mut.Unlock()
+
+	return buf, err
 }
 
+// Write a block to the data file,
 func (f *DataFile) WriteBlock(buffer bytes.Buffer, overwrite bool) error {
 	var file *os.File
 	var err error
@@ -73,7 +81,9 @@ func (f *DataFile) WriteBlock(buffer bytes.Buffer, overwrite bool) error {
 		}
 	}
 
+	f.Mut.Lock()
 	n, err := file.Write(buffer.Bytes())
+	f.Mut.Unlock()
 
 	if err != nil {
 		if n%4096 != 0 {
@@ -82,11 +92,47 @@ func (f *DataFile) WriteBlock(buffer bytes.Buffer, overwrite bool) error {
 		return err
 	}
 
-	if overwrite {
+	if !overwrite {
 		f.Blocks++
 	}
 
 	return nil
+}
+
+// DataFileReader is a Reader that automatically locks the datafile's mutex for every call to read
+type DataFileReader struct {
+	mut *sync.RWMutex
+	f   *os.File
+}
+
+func (r *DataFileReader) Read(p []byte) (n int, err error) {
+	r.mut.RLock()
+	n, err = r.f.Read(p)
+	r.mut.RUnlock()
+	return
+}
+
+func (r *DataFileReader) Seek(offset int64, whence int) (ret int64, err error) {
+	return r.f.Seek(offset, whence)
+}
+
+func (r *DataFileReader) Close() error {
+	return r.f.Close()
+}
+
+func (f *DataFile) GetReader() (*DataFileReader, error) {
+	handle, err := os.Open(f.Path)
+
+	if err != nil {
+		return nil, err
+	}
+
+	r := DataFileReader{
+		mut: &f.Mut,
+		f:   handle,
+	}
+
+	return &r, nil
 }
 
 func NewDataFile(basePath string, timeStart int64, timeRange int64) DataFile {
