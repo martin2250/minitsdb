@@ -109,4 +109,6 @@ LoopMain:
 	for _, s := range db.Series {
 		s.FlushAll()
 	}
+
+	log.Info("Terminating")
 }
