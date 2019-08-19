@@ -14,7 +14,7 @@ import (
 type FirstPointSource struct {
 	params        *Parameters
 	buffer        storage.PointBuffer
-	reader        encoding.FileDecoder
+	reader        storage.FileDecoder
 	rambuffer     storage.PointBuffer
 	transformers  []encoding.Transformer
 	timeStepInput int64
@@ -192,11 +192,11 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 // params.TimeStart gets adjusted to reflect the values already read
 func NewFirstPointSource(files []storage.DataFile, params *Parameters, rambuffer storage.PointBuffer, transformers []encoding.Transformer, timeStepInput int64) FirstPointSource {
 	// create list of relevant files
-	filesRange := make([]string, 0, 8)
+	filesRange := make([]*storage.DataFile, 0, 8)
 
-	for _, file := range files {
+	for i, file := range files {
 		if file.TimeEnd >= params.TimeStart || file.TimeStart >= params.TimeEnd {
-			filesRange = append(filesRange, file.Path)
+			filesRange = append(filesRange, &files[i])
 		}
 	}
 
@@ -218,7 +218,7 @@ func NewFirstPointSource(files []storage.DataFile, params *Parameters, rambuffer
 	src := FirstPointSource{
 		buffer:        storage.NewPointBuffer(len(params.Columns)),
 		params:        params,
-		reader:        encoding.NewFileDecoder(filesRange, colIndices),
+		reader:        storage.NewFileDecoder(filesRange, colIndices),
 		rambuffer:     rambuffer,
 		transformers:  transformers,
 		timeStepInput: timeStepInput,

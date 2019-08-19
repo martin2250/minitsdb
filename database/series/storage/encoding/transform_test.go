@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func testTransform(t *testing.T, transformer Transformer) {
+func testTransform(t *testing.T, tr Transformer) {
 	input := []int64{6, 7, 8, 9, 10, 10, 11, 12, 14, 15, 16, 18, 20, 22, 24, 26, 28}
 
 	// make a copy to ensure that the apply method does not modify it's input
@@ -12,7 +12,7 @@ func testTransform(t *testing.T, transformer Transformer) {
 	copy(inputCopy, input)
 
 	// apply transformation
-	encoded, err := Apply(inputCopy)
+	encoded, err := tr.Apply(inputCopy)
 
 	if err != nil {
 		t.Error(err)
@@ -28,7 +28,7 @@ func testTransform(t *testing.T, transformer Transformer) {
 	}
 
 	// revert transformation
-	decoded, err := Revert(encoded)
+	decoded, err := tr.Revert(encoded)
 
 	if err != nil {
 		t.Error(err)

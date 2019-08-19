@@ -1,15 +1,15 @@
-package encoding
+package storage
 
 import (
+	"github.com/martin2250/minitsdb/database/series/storage/encoding"
 	"io"
-	"os"
 )
 
 // FileDecoder decodes blocks from multiple files and handles opening / closing files
 type FileDecoder struct {
-	files       []string // files to be read
-	decoder     Decoder
-	currentFile *os.File // file that is currently being read (only held for closing)
+	files       []*DataFile // files to be read
+	decoder     encoding.Decoder
+	currentFile *DataFileReader // file that is currently being read (only held for closing)
 }
 
 func (d *FileDecoder) nextFile() error {
@@ -20,7 +20,7 @@ func (d *FileDecoder) nextFile() error {
 	d.Close()
 
 	var err error
-	d.currentFile, err = os.Open(d.files[0])
+	d.currentFile, err = d.files[0].GetReader()
 
 	if err != nil {
 		return err
@@ -32,12 +32,12 @@ func (d *FileDecoder) nextFile() error {
 	return nil
 }
 
-func (d *FileDecoder) DecodeHeader() (BlockHeader, error) {
+func (d *FileDecoder) DecodeHeader() (encoding.BlockHeader, error) {
 	for len(d.files) > 0 || d.currentFile != nil {
 		if d.currentFile == nil {
 			err := d.nextFile()
 			if err != nil {
-				return BlockHeader{}, err
+				return encoding.BlockHeader{}, err
 			}
 		}
 
@@ -49,21 +49,13 @@ func (d *FileDecoder) DecodeHeader() (BlockHeader, error) {
 		case err == io.EOF:
 			d.Close()
 		case err != io.EOF:
-			return BlockHeader{}, err
+			return encoding.BlockHeader{}, err
 		}
 	}
-	return BlockHeader{}, io.EOF
+	return encoding.BlockHeader{}, io.EOF
 }
 
 func (d *FileDecoder) DecodeBlock() ([][]uint64, error) {
-	// if not at body, use FileDeocder.DecodeHeader as it reloads files automatically
-	if d.decoder.s != stateBody {
-		_, err := d.DecodeHeader()
-		if err != nil {
-			return nil, err
-		}
-	}
-	// decoder is now at stateBody
 	values, err := d.decoder.DecodeBlock()
 
 	if err == io.EOF {
@@ -84,10 +76,10 @@ func (d *FileDecoder) Close() {
 	}
 }
 
-func NewFileDecoder(files []string, columns []int) FileDecoder {
+func NewFileDecoder(files []*DataFile, columns []int) FileDecoder {
 	f := FileDecoder{
 		files:       files,
-		decoder:     NewDecoder(),
+		decoder:     encoding.NewDecoder(),
 		currentFile: nil,
 	}
 
