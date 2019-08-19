@@ -190,13 +190,13 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 // NewFirstPointSource creates a new fps and initializes the bucket reader
 // valuesRAM: points that are stored in series.Values
 // params.TimeStart gets adjusted to reflect the values already read
-func NewFirstPointSource(files []storage.DataFile, params *Parameters, rambuffer storage.PointBuffer, transformers []encoding.Transformer, timeStepInput int64) FirstPointSource {
+func NewFirstPointSource(files []*storage.DataFile, params *Parameters, rambuffer storage.PointBuffer, transformers []encoding.Transformer, timeStepInput int64) FirstPointSource {
 	// create list of relevant files
 	filesRange := make([]*storage.DataFile, 0, 8)
 
 	for i, file := range files {
 		if file.TimeEnd >= params.TimeStart || file.TimeStart >= params.TimeEnd {
-			filesRange = append(filesRange, &files[i])
+			filesRange = append(filesRange, files[i])
 		}
 	}
 

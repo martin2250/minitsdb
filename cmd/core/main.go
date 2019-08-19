@@ -107,6 +107,6 @@ LoopMain:
 	log.Info("Flushing buffers")
 
 	for _, s := range db.Series {
-		s.Flush()
+		s.FlushAll()
 	}
 }

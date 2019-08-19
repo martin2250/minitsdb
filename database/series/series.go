@@ -415,6 +415,12 @@ func (s *Series) Flush() {
 	}
 }
 
+func (s *Series) FlushAll() {
+	for s.Buffer.Len() > 0 {
+		s.Flush()
+	}
+}
+
 func (s *Series) Query(params query.Parameters) *query.Query {
 	// adjust param time step to be an integer multiple of a bucket time step
 	if params.TimeStep < 1 {

@@ -25,8 +25,8 @@ type handleQuery struct {
 	mutRequests sync.Mutex
 }
 
-func newHandleQuery(db *database.Database) handleQuery {
-	return handleQuery{
+func newHandleQuery(db *database.Database) *handleQuery {
+	return &handleQuery{
 		db:          db,
 		requests:    make(map[seriesRequestParams]*seriesRequest),
 		mutRequests: sync.Mutex{},
@@ -172,7 +172,7 @@ func logHTTPError(w http.ResponseWriter, r *http.Request, error string, code int
 	http.Error(w, error, code)
 }
 
-func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// decode query parameters
 	par := struct {
 		Series  map[string]string
@@ -195,7 +195,6 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log.WithFields(log.Fields{
 		"client": r.RemoteAddr,
-		"url":    r.URL,
 		"par":    par,
 	}).Info("Received API request")
 

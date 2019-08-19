@@ -27,7 +27,7 @@ type DataFile struct {
 }
 
 // ReadBlock reads the n-th block of a file
-func (f DataFile) ReadBlock(n int64) (bytes.Buffer, error) {
+func (f *DataFile) ReadBlock(n int64) (bytes.Buffer, error) {
 	file, err := os.Open(f.Path)
 
 	if err != nil {
@@ -40,9 +40,9 @@ func (f DataFile) ReadBlock(n int64) (bytes.Buffer, error) {
 		return bytes.Buffer{}, err
 	}
 
-	f.Mut.Lock()
+	f.Mut.RLock()
 	buf, err := util.ReadBlock(file)
-	f.Mut.Unlock()
+	f.Mut.RUnlock()
 
 	return buf, err
 }
@@ -60,6 +60,9 @@ func (f *DataFile) WriteBlock(buffer bytes.Buffer, overwrite bool) error {
 	if f.Blocks == 0 {
 		overwrite = false
 	}
+
+	f.Mut.Lock()
+	defer f.Mut.Unlock()
 
 	// only use seek when overwriting
 	if overwrite {
@@ -81,9 +84,7 @@ func (f *DataFile) WriteBlock(buffer bytes.Buffer, overwrite bool) error {
 		}
 	}
 
-	f.Mut.Lock()
 	n, err := file.Write(buffer.Bytes())
-	f.Mut.Unlock()
 
 	if err != nil {
 		if n%4096 != 0 {
@@ -135,8 +136,8 @@ func (f *DataFile) GetReader() (*DataFileReader, error) {
 	return &r, nil
 }
 
-func NewDataFile(basePath string, timeStart int64, timeRange int64) DataFile {
-	return DataFile{
+func NewDataFile(basePath string, timeStart int64, timeRange int64) *DataFile {
+	return &DataFile{
 		Path:      path.Join(basePath, fmt.Sprintf("%011d.mdb", timeStart)),
 		Blocks:    0,
 		TimeStart: timeStart,

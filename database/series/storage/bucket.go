@@ -25,7 +25,7 @@ type Bucket struct {
 	PointsPerFile int64
 
 	// index: start time
-	DataFiles []DataFile
+	DataFiles []*DataFile
 
 	Path string
 }
@@ -37,7 +37,7 @@ func (b *Bucket) sortFiles() {
 }
 
 func (b *Bucket) loadFiles() error {
-	b.DataFiles = make([]DataFile, 0, 16)
+	b.DataFiles = make([]*DataFile, 0, 16)
 
 	// list database files
 	fileInfos, err := ioutil.ReadDir(b.Path)
@@ -59,7 +59,7 @@ func (b *Bucket) loadFiles() error {
 			continue
 		}
 
-		b.DataFiles = append(b.DataFiles, file)
+		b.DataFiles = append(b.DataFiles, &file)
 	}
 
 	// should already be sorted as ioutil returns list of files sorted
@@ -127,14 +127,14 @@ func (b *Bucket) createDataFile(fileTime int64) *DataFile {
 
 	for j := range b.DataFiles {
 		if b.DataFiles[j].TimeStart == fileTime {
-			return &b.DataFiles[j]
+			return b.DataFiles[j]
 		}
 	}
 	b.DataFiles = append(b.DataFiles, NewDataFile(b.Path, fileTime, b.TimeResolution*b.PointsPerFile))
 
 	b.sortFiles()
 
-	return &b.DataFiles[len(b.DataFiles)-1]
+	return b.DataFiles[len(b.DataFiles)-1]
 }
 
 // GetStorageTime checks how many points fit into the same file as the first point
