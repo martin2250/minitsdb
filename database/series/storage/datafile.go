@@ -107,9 +107,7 @@ type DataFileReader struct {
 }
 
 func (r *DataFileReader) Read(p []byte) (n int, err error) {
-	r.mut.RLock()
 	n, err = r.f.Read(p)
-	r.mut.RUnlock()
 	return
 }
 
@@ -118,6 +116,7 @@ func (r *DataFileReader) Seek(offset int64, whence int) (ret int64, err error) {
 }
 
 func (r *DataFileReader) Close() error {
+	r.mut.RUnlock()
 	return r.f.Close()
 }
 
@@ -132,6 +131,8 @@ func (f *DataFile) GetReader() (*DataFileReader, error) {
 		mut: &f.Mut,
 		f:   handle,
 	}
+
+	r.mut.RLock()
 
 	return &r, nil
 }
