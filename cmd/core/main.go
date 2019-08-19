@@ -1,7 +1,6 @@
 package main
 
 import (
-	fifo "github.com/foize/go.fifo"
 	"github.com/gorilla/mux"
 	"github.com/jessevdk/go-flags"
 	"github.com/martin2250/minitsdb/api"
@@ -13,43 +12,9 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 )
-
-type ExecutorQueque struct {
-	executors *fifo.Queue
-}
-
-func NewExecutorQueque() ExecutorQueque {
-	return ExecutorQueque{
-		executors: fifo.NewQueue(),
-	}
-}
-
-//AddQuery enqueues a query to be executed on the next query cycle
-func (q ExecutorQueque) Add(e api.Executor) {
-	q.executors.Add(e)
-}
-
-//GetQuery returns the oldest query from the query buffer
-//returns false if no query is available
-func (q ExecutorQueque) Get() (api.Executor, bool) {
-	ei := q.executors.Next()
-
-	if ei == nil {
-		return nil, false
-	}
-
-	e, ok := ei.(api.Executor)
-
-	if !ok {
-		return nil, false
-	}
-
-	return e, true
-}
 
 func main() {
 	opts := struct {
@@ -110,9 +75,7 @@ func main() {
 	}
 	routerApi.Handle("/insert", httpl)
 
-	gqueue := NewExecutorQueque()
-
-	api.Register(&db, routerApi, gqueue)
+	api.Register(&db, routerApi)
 
 	//api := api.NewDatabaseAPI(&db)
 	//
@@ -132,27 +95,6 @@ LoopMain:
 			if err != nil {
 				log.Println(err)
 			}
-		}
-
-		// serve queries
-		if gqueue.executors.Len() > 0 {
-			// wait for more queries to arrive
-			// todo: improve this by checking if there are queries waiting in api
-			time.Sleep(10 * time.Millisecond)
-
-			// wait until all queries are finished but run them in parallel
-			var wg sync.WaitGroup
-			for {
-				e, ok := gqueue.Get()
-				if ok {
-					wg.Add(1)
-					go func() {
-						e.Execute()
-						wg.Done()
-					}()
-				}
-			}
-			wg.Wait()
 		}
 
 		select {

@@ -19,17 +19,15 @@ import (
 
 // handleQuery is the HTTP handler for grafana queries
 type handleQuery struct {
-	db  *database.Database
-	add ExecutorAdder
+	db *database.Database
 
 	requests    map[seriesRequestParams]*seriesRequest
 	mutRequests sync.Mutex
 }
 
-func newHandleQuery(db *database.Database, add ExecutorAdder) handleQuery {
+func newHandleQuery(db *database.Database) handleQuery {
 	return handleQuery{
 		db:          db,
-		add:         add,
 		requests:    make(map[seriesRequestParams]*seriesRequest),
 		mutRequests: sync.Mutex{},
 	}
@@ -284,13 +282,13 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if par.Wait {
 				h.requests[srp] = request
 				// after x time, actually let the main goroutine execute the query
-				time.AfterFunc(20*time.Millisecond, func() {
+				time.AfterFunc(10*time.Millisecond, func() {
 					h.mutRequests.Lock()
 					sr := h.requests[srp]
 					delete(h.requests, srp)
 					h.mutRequests.Unlock()
 
-					h.add.Add(sr)
+					go sr.Execute()
 				})
 			}
 		}
@@ -316,7 +314,7 @@ func (h handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if !ok && !par.Wait {
-			h.add.Add(request)
+			go request.Execute()
 		}
 	}
 
