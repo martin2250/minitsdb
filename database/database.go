@@ -13,10 +13,10 @@ type Database struct {
 }
 
 // FindSeries returns indices to all series that match the tagset
-func (ss Database) FindSeries(tags map[string]string) []*series.Series {
+func (db Database) FindSeries(tags map[string]string) []*series.Series {
 	matches := make([]*series.Series, 0)
 
-	for i, series := range ss.Series {
+	for i, series := range db.Series {
 		isMatch := true
 
 		for queryKey, queryValue := range tags {
@@ -35,7 +35,7 @@ func (ss Database) FindSeries(tags map[string]string) []*series.Series {
 		}
 
 		if isMatch {
-			matches = append(matches, &ss.Series[i])
+			matches = append(matches, &db.Series[i])
 		}
 	}
 
@@ -49,8 +49,9 @@ var ErrSeriesAmbiguous = errors.New("point values matches two series")
 var ErrSeriesUnknown = errors.New("value doesn't match any series")
 
 // InsertPoint finds a matching series and tries to insert the point
-func (ss *Database) InsertPoint(p ingest.Point) error {
-	indices := ss.FindSeries(p.Tags)
+// todo: move this somewhere else, db is only used once
+func (db *Database) InsertPoint(p ingest.Point) error {
+	indices := db.FindSeries(p.Tags)
 
 	if len(indices) == 0 {
 		return ErrSeriesUnknown
@@ -72,9 +73,13 @@ func (ss *Database) InsertPoint(p ingest.Point) error {
 		return err
 	}
 
-	if indices[0].CheckFlush() {
-		indices[0].Flush()
-	}
-
 	return nil
+}
+
+func (db *Database) FlushSeries() {
+	for _, s := range db.Series {
+		if s.CheckFlush() {
+			s.Flush()
+		}
+	}
 }

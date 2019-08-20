@@ -149,6 +149,12 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 			}
 		}
 
+		// skip this point if the time step lies before the query range
+		if timeStepStart < s.params.TimeStart {
+			s.buffer.Discard(indexEnd)
+			continue
+		}
+
 		// not enough values to fill this time step
 		if indexEnd == -1 {
 			// this is firstpointsource, so there are no more points to complete this time step, just use all available values
@@ -195,9 +201,10 @@ func NewFirstPointSource(files []*storage.DataFile, params *Parameters, rambuffe
 	filesRange := make([]*storage.DataFile, 0, 8)
 
 	for i, file := range files {
-		if file.TimeEnd >= params.TimeStart || file.TimeStart >= params.TimeEnd {
-			filesRange = append(filesRange, files[i])
+		if file.TimeEnd < params.TimeStart || file.TimeStart > params.TimeEnd {
+			continue
 		}
+		filesRange = append(filesRange, files[i])
 	}
 
 	// create column indices for decoder

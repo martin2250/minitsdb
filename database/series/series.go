@@ -32,13 +32,17 @@ type Series struct {
 	FirstBucket   storage.Bucket
 	LastBuckets   []storage.Bucket
 
-	// LastFlush   time.Time
+	Tags map[string]string
+
 	OldestValue int64
 
-	Tags       map[string]string
-	FlushDelay time.Duration
-	BufferSize int
-	ReuseMax   int
+	LastFlush     time.Time
+	FlushInterval time.Duration
+
+	FlushCount      int
+	ForceFlushCount int
+
+	ReuseMax int
 }
 
 // ErrColumnMismatch indicates that the insert failed because point values could not be assigned to series columns unambiguously
@@ -157,8 +161,11 @@ func OpenSeries(seriespath string) (Series, error) {
 
 	// create series struct
 	s := Series{
-		FlushDelay:  conf.FlushDelay,
-		BufferSize:  conf.Buffer,
+		FlushCount:      conf.FlushCount,
+		ForceFlushCount: conf.ForceFlushCount,
+		FlushInterval:   conf.FlushInterval,
+		LastFlush:       time.Now(),
+
 		ReuseMax:    conf.ReuseMax,
 		Columns:     make([]Column, 0),
 		LastBuckets: make([]storage.Bucket, len(conf.Buckets)),
@@ -319,12 +326,27 @@ func (s *Series) checkFirstBucket() error {
 	return nil
 }
 
+// CheckFlush checks if the series is due for a regular flush
 func (s *Series) CheckFlush() bool {
-	if s.Buffer.Len() > s.BufferSize {
+	// never flush when all values were loaded from disk
+	if s.OldestValue == math.MaxInt64 {
+		return false
+	}
+
+	// flush if buffer size exceeds force flush count
+	if s.Buffer.Len() >= s.ForceFlushCount {
 		return true
 	}
 
-	// todo: also check against last write and flushdelay
+	// don't do next check if the flush interval has not elapsed since the last flush
+	if time.Now().Sub(s.LastFlush) < s.FlushInterval {
+		return false
+	}
+
+	// check if buffer size exceeds flush count
+	if s.Buffer.Len() >= s.FlushCount {
+		return true
+	}
 
 	return false
 }
@@ -334,6 +356,7 @@ func (s *Series) CheckFlush() bool {
 func (s *Series) Discard(n int) {
 	s.Buffer.Discard(n)
 
+	// todo: this decision should also be based on wether the block was marked for overwriting
 	if s.Buffer.Len() == 0 {
 		s.OldestValue = math.MaxInt64
 	} else {
@@ -352,7 +375,13 @@ func (s *Series) SaveDiscard(n int) {
 // todo: b) or a configurable maximum amount of values is in the buffer
 // Flush does not return an error, errors are handled by the function itself
 func (s *Series) Flush() {
-	if s.Buffer.Len() == 0 || s.OldestValue == math.MaxInt64 {
+	if s.Buffer.Len() == 0 {
+		return
+	}
+
+	// if the oldest value is already stored on disk, just discard everything
+	if s.OldestValue == math.MaxInt64 {
+		s.Discard(s.Buffer.Len())
 		return
 	}
 
@@ -413,6 +442,8 @@ func (s *Series) Flush() {
 		s.Discard(header.NumPoints)
 		fmt.Println(", flushing buffer")
 	}
+
+	s.LastFlush = time.Now()
 }
 
 func (s *Series) FlushAll() {

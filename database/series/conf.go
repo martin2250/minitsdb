@@ -24,8 +24,11 @@ type YamlColumnConfig struct {
 
 // YamlSeriesConfig describes the YAML file for a series
 type YamlSeriesConfig struct {
-	FlushDelay time.Duration
-	Buffer     int
+	FlushInterval time.Duration
+
+	FlushCount      int
+	ForceFlushCount int
+
 	ReuseMax   int
 	PointsFile int64
 
@@ -65,12 +68,16 @@ func LoadSeriesYamlConfig(seriesPath string) (YamlSeriesConfig, error) {
 
 // Check checks config for errors
 func (c *YamlSeriesConfig) Check() error {
-	if c.FlushDelay < 10*time.Second {
-		return errors.New("flush delay must be greater than or equal to 10s")
+	if c.FlushInterval < 10*time.Second {
+		return errors.New("flush interval must be greater than or equal to 10s")
 	}
 
-	if c.Buffer < 50 {
-		return errors.New("buffer size must be greater than 50 or equal to points")
+	if c.FlushCount < 50 {
+		return errors.New("flush count must be greater than 50 or equal to points")
+	}
+
+	if c.ForceFlushCount < c.FlushCount {
+		return errors.New("force flush count must be greater than or equal to flush count")
 	}
 
 	if c.ReuseMax < 0 || c.ReuseMax > 4096 {

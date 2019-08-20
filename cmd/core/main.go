@@ -77,28 +77,31 @@ func main() {
 
 	api.Register(&db, routerApi)
 
-	//api := api.NewDatabaseAPI(&db)
-	//
-	//http.Handle("/query/", api)
+	timerFlush := time.Tick(1 * time.Second)
+	timerInsert := time.Tick(10 * time.Millisecond)
 
 	go srv.ListenAndServe()
 
 LoopMain:
 	for {
-		// insert new points
-		for {
-			point, ok := buffer.GetPoint()
-			if !ok {
-				break
-			}
-			err = db.InsertPoint(point)
-			if err != nil {
-				log.Println(err)
-			}
-		}
-
 		select {
-		case <-time.Tick(10 * time.Millisecond):
+		case <-timerFlush:
+			for _, s := range db.Series {
+				if s.CheckFlush() {
+					s.Flush()
+				}
+			}
+		case <-timerInsert:
+			for {
+				point, ok := buffer.GetPoint()
+				if !ok {
+					break
+				}
+				err = db.InsertPoint(point)
+				if err != nil {
+					log.Println(err)
+				}
+			}
 		case <-shutdown:
 			break LoopMain
 		}
