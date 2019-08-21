@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"github.com/martin2250/minitsdb/database"
 	"github.com/martin2250/minitsdb/database/series"
-	"github.com/martin2250/minitsdb/database/series/query"
-	"github.com/martin2250/minitsdb/database/series/query/downsampling"
+	"github.com/martin2250/minitsdb/database/series/downsampling"
 	"github.com/martin2250/minitsdb/database/series/storage"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
@@ -66,7 +65,7 @@ type seriesRequest struct {
 	// the receivers
 	receivers []seriesRequestReceiver
 	// columns to be read (unordered)
-	columns []query.Column
+	columns []series.QueryColumn
 }
 
 type seriesInfo struct {
@@ -105,18 +104,14 @@ func (r *seriesRequest) Execute() error {
 		"columns":   len(r.columns),
 	}).Info("Executing series request")
 
-	// todo: move this to the point sources
-	//sort.Slice(r.columns, func(i, j int) bool {
-	//	return r.columns[i].Index < r.columns[j].Index
-	//})
-
 	// todo: really important: unscramble data again (aka provide a map to the receivers)
 
-	q := r.params.s.Query(query.Parameters{
-		TimeStep:  r.params.timeStep,
-		Columns:   r.columns,
-		TimeStart: r.params.timeStart,
-		TimeEnd:   r.params.timeEnd,
+	q := r.params.s.Query(series.Parameters{
+		TimeStep: r.params.timeStep,
+		Columns:  r.columns,
+	}, series.TimeRange{
+		Start: r.params.timeStart,
+		End:   r.params.timeEnd,
 	})
 
 	for {
@@ -231,10 +226,10 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// construct query columns for each series
-	queryColumns := make([][]query.Column, len(matches))
+	queryColumns := make([][]series.QueryColumn, len(matches))
 
 	for i, s := range matches { // loop over all series that match the query
-		queryColumns[i] = make([]query.Column, 0, len(par.Columns))
+		queryColumns[i] = make([]series.QueryColumn, 0, len(par.Columns))
 
 		for _, pCol := range par.Columns { // loop over all column descriptions in the query
 			// find downsampler
@@ -263,7 +258,7 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			for _, iCol := range s.GetIndices(pCol.Tags) {
 				// todo: check if column supports downsampler, else skip; don't error
 				// also actually implement different downsamplers
-				queryColumns[i] = append(queryColumns[i], query.Column{
+				queryColumns[i] = append(queryColumns[i], series.QueryColumn{
 					Index:       iCol,
 					Downsampler: ds,
 				})
@@ -292,7 +287,7 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			request = &seriesRequest{
 				params:    srp,
 				receivers: make([]seriesRequestReceiver, 0, 1),
-				columns:   make([]query.Column, 0, len(columnsMatch)),
+				columns:   make([]series.QueryColumn, 0, len(columnsMatch)),
 			}
 
 			if par.Wait {

@@ -1,6 +1,8 @@
 package storage
 
-import "github.com/martin2250/minitsdb/util"
+import (
+	"github.com/martin2250/minitsdb/util"
+)
 
 type PointBuffer struct {
 	Time   []int64

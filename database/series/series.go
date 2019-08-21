@@ -4,17 +4,17 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/martin2250/minitsdb/database/series/query"
 	"github.com/martin2250/minitsdb/database/series/storage"
 	"github.com/martin2250/minitsdb/database/series/storage/encoding"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/martin2250/minitsdb/ingest"
 	"github.com/martin2250/minitsdb/util"
 )
 
-// Column holds the json structure that describes a column in a series
+// QueryColumn holds the json structure that describes a column in a series
 type Column struct {
 	Tags        map[string]string
 	Decimals    int
@@ -43,6 +43,8 @@ type Series struct {
 	ForceFlushCount int
 
 	ReuseMax int
+
+	Mux sync.Mutex
 }
 
 // ErrColumnMismatch indicates that the insert failed because point values could not be assigned to series columns unambiguously
@@ -452,7 +454,7 @@ func (s *Series) FlushAll() {
 	}
 }
 
-func (s *Series) Query(params query.Parameters) *query.Query {
+func (s *Series) Query(params Parameters, timeRange TimeRange) *Query {
 	// adjust param time step to be an integer multiple of a bucket time step
 	if params.TimeStep < 1 {
 		params.TimeStep = 1
@@ -468,23 +470,16 @@ func (s *Series) Query(params query.Parameters) *query.Query {
 	//}
 
 	// create query object
-	q := &query.Query{
-		Param:   params,
-		Sources: make([]query.PointSource, 0, 1),
+	q := &Query{
+		Param:     params,
+		Sources:   make([]PointSource, 0, 1),
+		TimeRange: timeRange,
 	}
 
 	// create first point source
 	// todo: add sources for other buckets
-	fpsRamValues := storage.NewPointBuffer(len(params.Columns))
-	fpsTransformers := make([]encoding.Transformer, len(params.Columns))
 
-	fpsRamValues.Time = s.Buffer.Time
-	for i, col := range params.Columns {
-		fpsRamValues.Values[i] = s.Buffer.Values[col.Index]
-		fpsTransformers[i] = s.Columns[col.Index].Transformer
-	}
-
-	fps := query.NewFirstPointSource(s.FirstBucket.DataFiles, &q.Param, fpsRamValues, fpsTransformers, s.FirstBucket.TimeResolution)
+	fps := NewFirstPointSource(s, &q.TimeRange, params.Columns, params.TimeStep)
 	q.Sources = append(q.Sources, &fps)
 
 	return q
