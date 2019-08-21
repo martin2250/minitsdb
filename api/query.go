@@ -7,12 +7,12 @@ import (
 	"github.com/martin2250/minitsdb/database"
 	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/database/series/query"
+	"github.com/martin2250/minitsdb/database/series/query/downsampling"
 	"github.com/martin2250/minitsdb/database/series/storage"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 	"io"
 	"net/http"
-	"sort"
 	"sync"
 	"time"
 )
@@ -105,9 +105,10 @@ func (r *seriesRequest) Execute() error {
 		"columns":   len(r.columns),
 	}).Info("Executing series request")
 
-	sort.Slice(r.columns, func(i, j int) bool {
-		return r.columns[i].Index < r.columns[j].Index
-	})
+	// todo: move this to the point sources
+	//sort.Slice(r.columns, func(i, j int) bool {
+	//	return r.columns[i].Index < r.columns[j].Index
+	//})
 
 	// todo: really important: unscramble data again (aka provide a map to the receivers)
 
@@ -207,8 +208,6 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	par.TimeStep = (par.TimeStep / time.Second) * time.Second
 	if par.TimeStep < time.Second {
 		par.TimeStep = time.Second
-		//logHTTPError(w, r, "time step must be a positive integer multiple of 1s", http.StatusBadRequest)
-		//return
 	}
 
 	timeStep := int64(par.TimeStep / time.Second)
@@ -238,17 +237,35 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		queryColumns[i] = make([]query.Column, 0, len(par.Columns))
 
 		for _, pCol := range par.Columns { // loop over all column descriptions in the query
-			if pCol.Downsampler != "" {
-				logHTTPError(w, r, "unknown downsampler", http.StatusNotFound)
-			}
-			matches := s.GetIndices(pCol.Tags)
+			// find downsampler
+			var ds downsampling.Downsampler
 
-			for _, iCol := range matches {
+			switch pCol.Downsampler {
+			case "", "mean":
+				ds = downsampling.DownsamplerMean
+			case "min":
+				ds = downsampling.DownsamplerMin
+			case "max":
+				ds = downsampling.DownsamplerMax
+			case "first":
+				ds = downsampling.DownsamplerFirst
+			case "last":
+				ds = downsampling.DownsamplerLast
+			case "count":
+				ds = downsampling.DownsamplerCount
+			case "sum":
+				ds = downsampling.DownsamplerSum
+			default:
+				logHTTPError(w, r, "unknown downsampler", http.StatusBadRequest)
+				return
+			}
+
+			for _, iCol := range s.GetIndices(pCol.Tags) {
 				// todo: check if column supports downsampler, else skip; don't error
 				// also actually implement different downsamplers
 				queryColumns[i] = append(queryColumns[i], query.Column{
 					Index:       iCol,
-					Downsampler: query.DownsamplerMean,
+					Downsampler: ds,
 				})
 			}
 		}

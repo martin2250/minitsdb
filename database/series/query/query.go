@@ -1,6 +1,7 @@
 package query
 
 import (
+	"github.com/martin2250/minitsdb/database/series/query/downsampling"
 	"github.com/martin2250/minitsdb/database/series/storage"
 	"io"
 )
@@ -8,7 +9,7 @@ import (
 // Column is the combination of a column index and aggregation
 type Column struct {
 	Index       int
-	Downsampler Downsampler
+	Downsampler downsampling.Downsampler
 }
 
 type Parameters struct {
