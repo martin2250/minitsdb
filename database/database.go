@@ -69,6 +69,10 @@ func (db *Database) InsertPoint(p ingest.Point) error {
 
 	err = indices[0].InsertPoint(ps)
 
+	if indices[0].CheckFlush() {
+		indices[0].Flush()
+	}
+
 	if err != nil {
 		return err
 	}

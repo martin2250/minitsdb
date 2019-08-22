@@ -149,10 +149,6 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 		output.Values[i] = make([]int64, 0)
 	}
 
-	if s.buffer.Len() == 0 {
-		return output, nil
-	}
-
 	for s.buffer.Len() > 0 {
 		// downsample data into output array
 		var currentTimeStep TimeRange

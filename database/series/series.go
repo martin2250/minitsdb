@@ -47,6 +47,11 @@ type Series struct {
 	Mux sync.Mutex
 }
 
+type AssociatedPoint struct {
+	Point  storage.Point
+	Series *Series
+}
+
 // ErrColumnMismatch indicates that the insert failed because point values could not be assigned to series columns unambiguously
 var ErrColumnMismatch = errors.New("point values could not be assigned to series columns unambiguously")
 

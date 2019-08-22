@@ -19,6 +19,12 @@ type PointSink interface {
 	AddPoint(point Point)
 }
 
+type ChanPointSink chan<- Point
+
+func (cps ChanPointSink) AddPoint(point Point) {
+	cps <- point
+}
+
 // PointSource returns points that should be stored in the database
 // implementations might include a simple fifo or a rpc call to a
 // separate process that handles and buffers ingests
