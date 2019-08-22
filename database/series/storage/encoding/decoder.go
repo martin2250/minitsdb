@@ -1,6 +1,7 @@
 package encoding
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -23,12 +24,15 @@ type Decoder struct {
 	reader io.Reader
 	s      decoderState
 	// Columns contains a sorted list of columns that should be read
-	Columns []int
+	Columns     []int
+	block       []byte
+	blockReader bytes.Reader
 }
 
 func NewDecoder() Decoder {
 	return Decoder{
-		s: stateError,
+		s:     stateError,
+		block: make([]byte, BlockSize),
 	}
 }
 
@@ -55,16 +59,19 @@ func (d *Decoder) DecodeHeader() (BlockHeader, error) {
 	switch d.s {
 	case stateError:
 		return BlockHeader{}, errors.New("decoder is in error state")
-	case stateBody:
-		err := d.skipWords(512 - 3)
-		if err != nil {
-			d.s = stateError
-			return BlockHeader{}, err
-		}
 	}
+
+	// read next block from file
+	_, err := d.reader.Read(d.block)
+	if err != nil {
+		d.s = stateError
+		return BlockHeader{}, err
+	}
+	d.blockReader.Reset(d.block)
+
 	var header blockHeaderRaw
 	// read header
-	err := binary.Read(d.reader, binary.LittleEndian, &header)
+	err = binary.Read(&d.blockReader, binary.LittleEndian, &header)
 
 	if err != nil {
 		d.s = stateError
@@ -93,13 +100,14 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 	values := make([][]uint64, len(d.Columns))
 
 	words := make([]uint64, 512-3)
-	if err := binary.Read(d.reader, binary.LittleEndian, words); err != nil {
+	if err := binary.Read(&d.blockReader, binary.LittleEndian, words); err != nil {
 		d.s = stateError
 		return nil, err
 	}
 
 	// number of columns read from the block
 	colsRead := 0
+	var buf [240]uint64
 
 	for i, col := range d.Columns {
 		// check if file even contains this column
@@ -148,7 +156,6 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 			var encoded uint64
 			encoded, words = words[0], words[1:]
 			// decode word
-			var buf [240]uint64
 			c, err := simple8b.Decode(&buf, encoded)
 			if err != nil {
 				d.s = stateError
