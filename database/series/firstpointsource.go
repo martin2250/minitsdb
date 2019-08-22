@@ -130,6 +130,7 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 	if isEOF {
 		// append RAM values if bucket reader is at end
 		// loop over all points in RAM
+		// todo: change this to insert
 		for i, t := range s.ramvalues.Time {
 			s.buffer.Time = append(s.buffer.Time, t)
 			for ic, c := range s.columns {
@@ -148,13 +149,22 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 		output.Values[i] = make([]int64, 0)
 	}
 
-	// downsample data into output array
-	// todo: continue work here
+	if s.buffer.Len() == 0 {
+		return output, nil
+	}
+
 	for s.buffer.Len() > 0 {
-		var timeStepStart = util.RoundDown(s.buffer.Time[0], s.timeStep)
+		// downsample data into output array
+		var currentTimeStep TimeRange
+		{
+			// don't know if this makes a difference
+			x := util.RoundDown(s.buffer.Time[0], s.timeStep)
+			currentTimeStep.Start = x
+			currentTimeStep.End = x + s.timeStep - 1
+		}
 
 		// stop if this time step exceeds timeend
-		if timeStepStart > s.timeRange.End {
+		if currentTimeStep.Start > s.timeRange.End {
 			isEOF = true
 			s.reader.Close()
 			break
@@ -164,35 +174,36 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 		var indexEnd = -1
 		for i, timeend := range s.buffer.Time {
 			// enough values if this point is the last of this step
-			if timeend == timeStepStart+s.timeStep-s.timeStepInput {
+			if timeend == currentTimeStep.End {
 				indexEnd = i + 1
 				break
 			}
 			// enough values if the next value does not belong in this step anymore
-			if timeStepStart != util.RoundDown(timeend, s.timeStep) {
+			if !currentTimeStep.Contains(timeend) {
 				indexEnd = i
 				break
 			}
 		}
 
 		// skip this point if the time step lies before the query range
-		if timeStepStart < s.timeRange.Start {
+		if currentTimeStep.Start < s.timeRange.Start {
 			s.buffer.Discard(indexEnd)
 			continue
 		}
 
 		// not enough values to fill this time step
 		if indexEnd == -1 {
-			// this is firstpointsource, so there are no more points to complete this time step, just use all available values
 			if isEOF {
+				// this is firstpointsource, so there are no more points to complete this time step, just use all available values
 				indexEnd = len(s.buffer.Time)
 			} else {
+				// keep values for next call to Next()
 				break
 			}
 		}
 
 		// append time of point to output
-		output.Time = append(output.Time, timeStepStart)
+		output.Time = append(output.Time, currentTimeStep.Start)
 		// append downsampled values
 		for iInput, colInput := range s.columns {
 			for _, colOutput := range colInput.Outputs {
@@ -202,10 +213,10 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 		}
 
 		// update query range
-		s.timeRange.Start = timeStepStart + s.timeStep - 1
+		s.timeRange.Start = currentTimeStep.End + 1
 
 		// stop if this time step is the last in this query
-		if timeStepStart+s.timeStep > s.timeRange.End {
+		if s.timeRange.Start > s.timeRange.End {
 			isEOF = true
 			s.reader.Close()
 			break
