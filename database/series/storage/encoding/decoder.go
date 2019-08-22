@@ -92,8 +92,12 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 
 	values := make([][]uint64, len(d.Columns))
 
-	// number of words left in block
-	wordsLeft := 512 - 3
+	words := make([]uint64, 512-3)
+	if err := binary.Read(d.reader, binary.LittleEndian, words); err != nil {
+		d.s = stateError
+		return nil, err
+	}
+
 	// number of columns read from the block
 	colsRead := 0
 
@@ -112,18 +116,14 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 			var pointsRead int
 			for pointsRead < d.Header.NumPoints {
 				// check if there are words left in this block
-				if wordsLeft == 0 {
+				if len(words) == 0 {
 					d.s = stateError
 					return nil, errors.New("column not complete at end of block")
 				}
-				// read word
-				var encoded uint64
-				if err := binary.Read(d.reader, binary.LittleEndian, &encoded); err != nil {
-					d.s = stateError
-					return nil, err
-				}
-				wordsLeft--
 				// check how many values this word contains
+				var encoded uint64
+				encoded, words = words[0], words[1:]
+
 				c, err := simple8b.Count(encoded)
 				if err != nil {
 					d.s = stateError
@@ -140,17 +140,13 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 		var pointsRead int
 		for pointsRead < d.Header.NumPoints {
 			// check if there are words left in this block
-			if wordsLeft == 0 {
+			if len(words) == 0 {
 				d.s = stateError
 				return nil, errors.New("column not complete at end of block")
 			}
 			// read word
 			var encoded uint64
-			if err := binary.Read(d.reader, binary.LittleEndian, &encoded); err != nil {
-				d.s = stateError
-				return nil, err
-			}
-			wordsLeft--
+			encoded, words = words[0], words[1:]
 			// decode word
 			var buf [240]uint64
 			c, err := simple8b.Decode(&buf, encoded)
@@ -164,13 +160,6 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 			pointsRead += c
 		}
 		colsRead++
-	}
-
-	// discard rest of block so reader is at next header
-	err := d.skipWords(wordsLeft)
-	if err != nil {
-		d.s = stateError
-		return nil, err
 	}
 
 	d.s = stateHeader
