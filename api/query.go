@@ -94,6 +94,13 @@ func (r *seriesRequest) sendToAll(d seriesRequestData) bool {
 }
 
 func (r *seriesRequest) Execute() error {
+	//// for profiling query execution time
+	//// todo: maybe make this selectable with flag?
+	//tmpfile, _ := ioutil.TempFile("", "*.pprof")
+	//log.Info(tmpfile.Name())
+	//pprof.StartCPUProfile(tmpfile)
+	//defer pprof.StopCPUProfile()
+
 	log.WithFields(log.Fields{
 		"ptr":       fmt.Sprintf("%p", r),
 		"series":    r.params.s.Tags,
@@ -103,8 +110,6 @@ func (r *seriesRequest) Execute() error {
 		"receivers": len(r.receivers),
 		"columns":   len(r.columns),
 	}).Info("Executing series request")
-
-	// todo: really important: unscramble data again (aka provide a map to the receivers)
 
 	q := r.params.s.Query(series.Parameters{
 		TimeStep: r.params.timeStep,
