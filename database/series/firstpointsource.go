@@ -86,10 +86,15 @@ func (s *FirstPointSource) readIntoBuffer() error {
 		}
 	}
 
-	s.buffer.AppendBuffer(storage.PointBuffer{
+	b := storage.PointBuffer{
 		Time:   timeNew,
 		Values: valuesNew,
-	})
+	}
+
+	b.TrimStart(s.timeRange.Start)
+	b.TrimEnd(s.timeRange.End)
+
+	s.buffer.AppendBuffer(b)
 
 	return nil
 }
@@ -132,9 +137,11 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 		// loop over all points in RAM
 		// todo: change this to insert
 		for i, t := range s.ramvalues.Time {
-			s.buffer.Time = append(s.buffer.Time, t)
-			for ic, c := range s.columns {
-				s.buffer.Values[ic] = append(s.buffer.Values[ic], s.ramvalues.Values[c.IndexFile][i])
+			if s.timeRange.Contains(t) {
+				index := s.buffer.InsertIndex(t)
+				for ic, c := range s.columns {
+					s.buffer.Values[ic][index] = s.ramvalues.Values[c.IndexFile][i]
+				}
 			}
 		}
 	}

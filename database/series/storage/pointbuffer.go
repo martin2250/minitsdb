@@ -14,46 +14,57 @@ type Point struct {
 	Values []int64
 }
 
-// InsertPoint inserts a point into the buffer
-// The index of the new point is determined automatically, new points can be inserted in the middle,
-// replace an existing point or be appended to the start or end
-// todo: test this
-func (b *PointBuffer) InsertPoint(point Point) {
+// InsertIndex returns the index where a point with the specified time
+// can be inserted. if no index with this time exists, such an index is created
+// time will be copied to this index, values must be copied by the caller
+func (b *PointBuffer) InsertIndex(time int64) int {
 	indexBuffer := 0
-	var insert bool // value is inserted into the buffer, pushing part of the buffer back
-	var atEnd bool  // value is appended to end of buffer
+	var atEnd bool // value is appended to end of buffer
 
 	for {
 		if indexBuffer >= len(b.Time) {
 			atEnd = true
 			break
 		}
-		if b.Time[indexBuffer] == point.Time {
-			break
+		if b.Time[indexBuffer] == time {
+			return indexBuffer
 		}
-		if b.Time[indexBuffer] > point.Time {
-			insert = true
+		if b.Time[indexBuffer] > time {
 			break
 		}
 		indexBuffer++
 	}
 
-	if atEnd || insert {
-		// in both cases the buffer needs to grow
-		b.AppendPoint(point)
-
-		if atEnd {
-			return
-		}
-
-		// shift all values one back
-		copy(b.Time[indexBuffer+1:], b.Time[indexBuffer:])
-		for i := range point.Values {
-			copy(b.Values[i][indexBuffer+1:], b.Values[i][indexBuffer:])
-		}
+	// in both cases the buffer needs to grow
+	b.Time = append(b.Time, time)
+	for i := range b.Values {
+		b.Values[i] = append(b.Values[i], 0)
 	}
 
-	b.Time[indexBuffer] = point.Time
+	if atEnd {
+		return indexBuffer
+	}
+
+	// shift all values one back
+	copy(b.Time[indexBuffer+1:], b.Time[indexBuffer:])
+	for i := range b.Values {
+		copy(b.Values[i][indexBuffer+1:], b.Values[i][indexBuffer:])
+	}
+
+	return indexBuffer
+}
+
+// InsertPoint inserts a point into the buffer
+// The index of the new point is determined automatically, new points can be inserted in the middle,
+// replace an existing point or be appended to the start or end
+// todo: test this
+func (b *PointBuffer) InsertPoint(point Point) {
+	if len(point.Values) != len(b.Values) {
+		panic("value count mismatch")
+	}
+
+	indexBuffer := b.InsertIndex(point.Time)
+
 	for i, val := range point.Values {
 		b.Values[i][indexBuffer] = val
 	}
@@ -114,6 +125,31 @@ func (b *PointBuffer) Discard(n int) {
 func (b *PointBuffer) Renew() {
 	b.Time = util.Copy1DInt64(b.Time)
 	b.Values = util.Copy2DInt64(b.Values)
+}
+
+// TrimStart discards all values that lie before start, assumes the buffer is sorted
+func (b *PointBuffer) TrimStart(start int64) {
+	l := b.Len()
+	s := 0
+	for s < l && b.Time[s] < start {
+		s++
+	}
+	b.Time = b.Time[s:]
+	for i := range b.Values {
+		b.Values[i] = b.Values[i][s:]
+	}
+}
+
+// TrimEnd discards all values that lie after end, assumes the buffer is sorted
+func (b *PointBuffer) TrimEnd(end int64) {
+	e := b.Len()
+	for e > 0 && b.Time[e-1] > end {
+		e--
+	}
+	b.Time = b.Time[:e]
+	for j := range b.Values {
+		b.Values[j] = b.Values[j][:e]
+	}
 }
 
 func NewPointBuffer(columns int) PointBuffer {
