@@ -2,17 +2,12 @@ package main
 
 import (
 	"github.com/gorilla/mux"
-	"github.com/jessevdk/go-flags"
 	"github.com/martin2250/minitsdb/api"
-	"github.com/martin2250/minitsdb/database"
 	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/ingest"
 	"github.com/martin2250/minitsdb/ingest/pointlistener"
 	log "github.com/sirupsen/logrus"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 )
 
@@ -20,107 +15,80 @@ import (
 // GOOS=linu GOARCH=arm GOARM=7 go build -ldflags="-w -s" .
 
 func main() {
-	//tmpfile, _ := ioutil.TempFile("", "*.pprof")
-	//log.Info(tmpfile.Name())
-	//pprof.StartCPUProfile(tmpfile)
-	//defer func() {
-	//	pprof.StopCPUProfile()
-	//	cmd := exec.Command("go", "tool", "pprof", "-web", "/tmp/___go_build_main_go", tmpfile.Name())
-	//	cmd.Run()
-	//	os.Remove(tmpfile.Name())
-	//}()
+	// command line
+	opts := readCommandLineOptions()
 
-	opts := struct {
-		DbPath string `short:"d" long:"database" description:"database path"`
-	}{
-		DbPath: "/home/martin/Desktop/minitsdb_database",
-	}
-	_, err := flags.Parse(&opts)
-
-	if err != nil {
-		return
+	// profiling
+	if opts.CpuProfilePath != "" {
+		startCpuProfile(opts.CpuProfilePath)
+		defer stopCpuProfile(opts.CpuProfilePlot)
 	}
 
-	// add shutdown handler
-	sigs := make(chan os.Signal)
+	// configuration
+	conf := readConfigurationFile(opts.ConfigPath)
+	if conf.DatabasePath != "" {
+		opts.DatabasePath = conf.DatabasePath
+	}
+
+	// shutdown
 	shutdown := make(chan bool)
+	go gracefulShutdown(shutdown, conf.ShutdownTimeout)
 
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	// database
+	db := loadDatabase(opts.DatabasePath)
 
-	go func() {
-		<-sigs
-		shutdown <- true
-		log.Info("Received signal to shutdown")
-		// force after timeout
-		time.Sleep(300 * time.Millisecond)
-	}()
-
-	// load database
-	log.WithField("path", opts.DbPath).Info("Loading database")
-	db, err := database.NewDatabase(opts.DbPath)
-
-	if err != nil {
-		log.WithField("error", err.Error()).Fatal("Failed to load database")
+	// ingestion
+	ingestPoints := make(chan ingest.Point, conf.IngestBufferCapacity)
+	associatedPoints := make(chan series.AssociatedPoint, conf.IngestBufferCapacity)
+	for i := uint(0); i < conf.IngestionWorkerCount; i++ {
+		go associatePoints(ingestPoints, associatedPoints, &db)
 	}
 
-	r := mux.NewRouter()
-	routerApi := r.PathPrefix("/api/").Subrouter()
+	// http
+	if conf.ApiPath != "" {
+		r := mux.NewRouter() // move this out of the if block when more handlers are added
 
-	srv := &http.Server{
-		Addr: "0.0.0.0:8080",
-		//WriteTimeout: time.Second * 15,
-		//ReadTimeout:  time.Second * 15,
-		//IdleTimeout:  time.Second * 60,
-		Handler: r,
+		routerApi := r.PathPrefix(conf.ApiPath).Subrouter()
+		api.Register(&db, routerApi)
+
+		httpl := pointlistener.HTTPLineProtocolHandler{
+			Sink: ingest.ChanPointSink(ingestPoints),
+		}
+		routerApi.Handle("/insert", httpl)
+
+		srv := &http.Server{
+			Addr:    conf.ApiListenAddress,
+			Handler: r,
+
+			ReadHeaderTimeout: conf.ApiTimeout,
+			ReadTimeout:       conf.ApiTimeout,
+			WriteTimeout:      conf.ApiTimeout,
+			IdleTimeout:       conf.ApiTimeout,
+		}
+		go shutdownOnError(srv.ListenAndServe, shutdown, conf.ShutdownTimeout, "HTTP server failed")
 	}
 
-	channelIngestPoints := make(chan ingest.Point, 1024*128)
-	channelAssociatedPoints := make(chan series.AssociatedPoint, 1024*128)
-
-	httpl := pointlistener.HTTPLineProtocolHandler{
-		Sink: ingest.ChanPointSink(channelIngestPoints),
+	// tcp
+	if conf.TcpListenAddress != "" {
+		tcpl := pointlistener.TCPLineProtocolListener{
+			Sink:    ingest.ChanPointSink(ingestPoints),
+			Address: conf.TcpListenAddress,
+		}
+		go shutdownOnError(tcpl.Listen, shutdown, conf.ShutdownTimeout, "TCP listener failed")
 	}
-	routerApi.Handle("/insert", httpl)
-
-	tcpl := pointlistener.TCPLineProtocolListener{
-		Sink: ingest.ChanPointSink(channelIngestPoints),
-	}
-
-	go tcpl.Listen(8001)
-
-	api.Register(&db, routerApi)
 
 	timerFlush := time.Tick(1 * time.Second)
-
-	go srv.ListenAndServe()
-
-	go func() {
-		for {
-			p := <-channelIngestPoints
-			indices := db.FindSeries(p.Tags)
-			if len(indices) != 1 {
-				continue
-			}
-			ps, err := indices[0].ConvertPoint(p)
-			if err != nil {
-				continue
-			}
-			channelAssociatedPoints <- series.AssociatedPoint{
-				Point:  ps,
-				Series: indices[0],
-			}
-		}
-	}()
 
 LoopMain:
 	for {
 		select {
 		case <-timerFlush:
 			db.FlushSeries()
-		case p := <-channelAssociatedPoints:
-			err = p.Series.InsertPoint(p.Point)
+		case p := <-associatedPoints:
+			err := p.Series.InsertPoint(p.Point)
 			if err != nil {
-				log.Println(err)
+				log.WithError(err).Warning("Insert Failed")
+				continue
 			}
 			if p.Series.CheckFlush() {
 				p.Series.Flush()

@@ -2,7 +2,6 @@ package pointlistener
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -13,12 +12,13 @@ import (
 
 // TCPLineProtocolListener listens for TCP connections, receives points in line protocol format and stores them in the sink
 type TCPLineProtocolListener struct {
-	Sink ingest.PointSink
+	Sink    ingest.PointSink
+	Address string
 }
 
 // Listen loops endlessly, accepting tcp connections
-func (tl TCPLineProtocolListener) Listen(port uint16) error {
-	l, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+func (tl TCPLineProtocolListener) Listen() error {
+	l, err := net.Listen("tcp", tl.Address)
 
 	if err != nil {
 		return err
