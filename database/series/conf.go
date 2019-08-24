@@ -16,10 +16,11 @@ type YamlBucketConfig struct {
 
 // YamlColumnConfig describes a column group (duplicate not applied yet) in SeriesConfig
 type YamlColumnConfig struct {
-	Decimals    int
-	Tags        map[string]string
-	Duplicate   []map[string]string
-	Transformer string
+	Decimals     int
+	Tags         map[string]string
+	Duplicate    []map[string]string
+	Transformer  string
+	Aggregations []string
 }
 
 // YamlSeriesConfig describes the YAML file for a series

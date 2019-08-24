@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/martin2250/minitsdb/database/series/downsampling"
 	"github.com/martin2250/minitsdb/database/series/storage"
 	"github.com/martin2250/minitsdb/database/series/storage/encoding"
 	"math"
@@ -14,11 +15,20 @@ import (
 	"github.com/martin2250/minitsdb/util"
 )
 
-// QueryColumn holds the json structure that describes a column in a series
+// Column holds the json structure that describes a column in a series
 type Column struct {
 	Tags        map[string]string
 	Decimals    int
 	Transformer encoding.Transformer
+
+	// IndexPrimary holds the index of this column in the primary bucket
+	// IndexPrimary starts at one to account for the time column
+	IndexPrimary int
+	// IndexSecondary holds the indices of all downsampled versions of this column
+	// in the secondary buckets. It contains one such index for every downsampling
+	// type registered to the system. Unused downsampling types have index 0
+	// IndexSecondary starts at two to account for time and count columns
+	IndexSecondary []int
 }
 
 // Series describes a time series, id'd by a name and tags
@@ -157,6 +167,70 @@ func (s Series) GetIndices(tags map[string]string) []int {
 	return indices
 }
 
+func (s *Series) addColumn(conf YamlColumnConfig, indexPrimary, indexSecondary *int) error {
+	col := Column{
+		Decimals:     conf.Decimals,
+		IndexPrimary: *indexPrimary,
+	}
+	*indexPrimary++
+
+	// find transformer
+	if conf.Transformer == "" {
+		col.Transformer = encoding.DiffTransformer{N: 1}
+	} else {
+		var err error
+		col.Transformer, err = encoding.FindTransformer(conf.Transformer)
+		if err != nil {
+			return err
+		}
+	}
+
+	// find aggregations
+	needs := make([]bool, downsampling.AggregatorCount)
+
+	if len(conf.Aggregations) == 0 {
+		// default to storing the mean
+		needs[downsampling.Mean.GetIndex()] = true
+	} else {
+		for _, as := range conf.Aggregations {
+			a, ok := downsampling.Aggregators[as]
+			if !ok {
+				return fmt.Errorf("aggregator %s not found", as)
+			}
+			a.Needs(needs)
+		}
+	}
+
+	if conf.Duplicate == nil {
+		conf.Duplicate = []map[string]string{{}}
+	}
+
+	for _, tagset := range conf.Duplicate {
+		dcol := col
+		dcol.Tags = map[string]string{}
+		dcol.IndexSecondary = make([]int, downsampling.AggregatorCount)
+
+		for i, need := range needs {
+			if need {
+				dcol.IndexSecondary[i] = *indexSecondary
+				*indexSecondary++
+			}
+		}
+
+		for tag, value := range conf.Tags {
+			dcol.Tags[tag] = value
+		}
+
+		for tag, value := range tagset {
+			dcol.Tags[tag] = value
+		}
+
+		s.Columns = append(s.Columns, dcol)
+	}
+
+	return nil
+}
+
 // OpenSeries opens series from file
 func OpenSeries(seriespath string) (Series, error) {
 	// load config file
@@ -183,44 +257,18 @@ func OpenSeries(seriespath string) (Series, error) {
 	}
 
 	// create columns
+	var (
+		indexPrimary   = 1
+		indexSecondary = 2
+	)
 	for _, colconf := range conf.Columns {
-		// create transformer
-		var transformer encoding.Transformer
-		if colconf.Transformer != "" {
-			var arg int
-			if _, err := fmt.Sscanf(colconf.Transformer, "D%d", &arg); err != nil {
-				transformer = encoding.DiffTransformer{N: arg}
-			} else {
-				return Series{}, fmt.Errorf("%s matches no known transformers", colconf.Transformer)
-			}
-		} else {
-			// default to differentiating once
-			transformer = encoding.DiffTransformer{N: 1}
+		err = s.addColumn(colconf, &indexPrimary, &indexSecondary)
+		if err != nil {
+			return Series{}, err
 		}
-
-		if colconf.Duplicate == nil {
-			s.Columns = append(s.Columns, Column{
-				Decimals:    colconf.Decimals,
-				Tags:        colconf.Tags,
-				Transformer: transformer,
-			})
-		} else {
-			for _, tagset := range colconf.Duplicate {
-				col := Column{
-					Decimals:    colconf.Decimals,
-					Tags:        make(map[string]string),
-					Transformer: transformer,
-				}
-
-				for tag, value := range colconf.Tags {
-					col.Tags[tag] = value
-				}
-
-				for tag, value := range tagset {
-					col.Tags[tag] = value
-				}
-				s.Columns = append(s.Columns, col)
-			}
+		// todo: change this arbitrary limit to something meaningful
+		if indexSecondary > 127 {
+			return Series{}, errors.New("column limit exceeded")
 		}
 	}
 
