@@ -1,17 +1,16 @@
 package pointlistener
 
 import (
+	ingest2 "github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"strings"
-
-	"github.com/martin2250/minitsdb/ingest"
 )
 
 // HTTPLineProtocolHandler handles http POST requests and stores incoming points to a point sink
 type HTTPLineProtocolHandler struct {
-	Sink ingest.PointSink
+	Sink ingest2.PointSink
 }
 
 // ServeHTTP processes a POST request with line protocol data
@@ -33,7 +32,7 @@ func (h HTTPLineProtocolHandler) ServeHTTP(writer http.ResponseWriter, request *
 	lines := strings.Split(text, "\n")
 
 	for _, line := range lines {
-		point, err := ingest.ParsePoint(line)
+		point, err := ingest2.ParsePoint(line)
 
 		if err != nil {
 			log.Printf("point err: %v\n", err)

@@ -2,7 +2,7 @@ package minitsdb
 
 import (
 	"errors"
-	"github.com/martin2250/minitsdb/ingest"
+	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
 )
 
 // Database holds series from a database directory

@@ -2,9 +2,9 @@ package main
 
 import (
 	"github.com/gorilla/mux"
-	"github.com/martin2250/minitsdb/api"
-	"github.com/martin2250/minitsdb/ingest"
-	"github.com/martin2250/minitsdb/ingest/pointlistener"
+	"github.com/martin2250/minitsdb/cmd/minitsdb-server/api"
+	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
+	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest/pointlistener"
 	"github.com/martin2250/minitsdb/minitsdb"
 	"github.com/rossmcdonald/telegram_hook"
 	log "github.com/sirupsen/logrus"

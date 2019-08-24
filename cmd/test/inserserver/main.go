@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/martin2250/minitsdb/ingest/pointlistener"
+	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest/pointlistener"
 	"time"
 
-	"github.com/martin2250/minitsdb/ingest"
+	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
 )
 
 func main() {

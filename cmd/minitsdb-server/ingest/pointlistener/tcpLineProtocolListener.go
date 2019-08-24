@@ -2,17 +2,16 @@ package pointlistener
 
 import (
 	"bufio"
+	ingest2 "github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
 	"io"
 	"log"
 	"net"
 	"strings"
-
-	"github.com/martin2250/minitsdb/ingest"
 )
 
 // TCPLineProtocolListener listens for TCP connections, receives points in line protocol format and stores them in the sink
 type TCPLineProtocolListener struct {
-	Sink    ingest.PointSink
+	Sink    ingest2.PointSink
 	Address string
 }
 
@@ -55,7 +54,7 @@ func (tl TCPLineProtocolListener) handleTCP(c net.Conn) {
 			break
 		}
 
-		point, err := ingest.ParsePoint(strings.TrimSpace(line))
+		point, err := ingest2.ParsePoint(strings.TrimSpace(line))
 
 		// don't close connection on parse error
 		if err != nil {

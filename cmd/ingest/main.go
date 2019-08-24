@@ -9,7 +9,7 @@ import (
 	"net/rpc"
 
 	fifo "github.com/foize/go.fifo"
-	"github.com/martin2250/minitsdb/ingest"
+	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
 )
 
 // Buffer is the IngestBuffer instance that holds the main program state

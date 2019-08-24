@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/martin2250/minitsdb/ingest"
+	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
 	"github.com/martin2250/minitsdb/util"
 )
 

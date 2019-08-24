@@ -12,7 +12,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/martin2250/minitsdb/ingest"
+	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
 )
 
 type column struct {
