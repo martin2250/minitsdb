@@ -237,21 +237,22 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		queryColumns[i] = make([]series.QueryColumn, 0, len(par.Columns))
 
 		for _, pCol := range par.Columns { // loop over all column descriptions in the query
-			// find function
-			var f downsampling.Function
-
-			if pCol.Function == "" {
-				f = downsampling.Mean // todo: replace by column default downsampler
-			} else {
-				f, err = downsampling.FindFunction(pCol.Function)
-
-				if err != nil {
-					logHTTPError(w, r, err.Error(), http.StatusNotFound)
-					return
-				}
-			}
-
 			for _, iCol := range s.GetIndices(pCol.Tags) {
+				// todo: move this one loop out, this is only here so e.g. a new aggregator is created for every column
+				// find function
+				var f downsampling.Function
+
+				if pCol.Function == "" {
+					f = downsampling.Mean // todo: replace by column default downsampler
+				} else {
+					f, err = downsampling.FindFunction(pCol.Function)
+
+					if err != nil {
+						logHTTPError(w, r, err.Error(), http.StatusNotFound)
+						return
+					}
+				}
+
 				// todo: check if column supports downsampler, else skip; don't error
 				// also actually implement different downsamplers
 				queryColumns[i] = append(queryColumns[i], series.QueryColumn{

@@ -45,5 +45,7 @@ func (derivativeFunctionGenerator) Create(args map[string]string) (Function, err
 		return nil, errors.New("argument 'seconds' must be greater than zero")
 	}
 
-	return derivativeFunction{seconds: i}, nil
+	return derivativeFunction{
+		seconds: i,
+	}, nil
 }

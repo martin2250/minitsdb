@@ -69,6 +69,7 @@ var (
 var Functions = map[string]Function{
 	"count":      Count,
 	"difference": Difference,
+	"diff":       Difference,
 	"peakpeak":   PeakPeak,
 }
 
@@ -85,10 +86,16 @@ func init() {
 // function generators
 var (
 	Derivative derivativeFunctionGenerator
+	Accumulate accumulateFunctionGenerator
+	Integrate  integrateFunctionGenerator
+	SinceStart sinceStartFunctionGenerator
 )
 
 var FunctionGenerators = map[string]FunctionGenerator{
 	"derivative": Derivative,
+	"accumulate": Accumulate,
+	"integrate":  Integrate,
+	"sincestart": SinceStart,
 }
 
 // FindFunction tries to find a matching function
