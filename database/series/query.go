@@ -9,7 +9,7 @@ import (
 // QueryColumn is the combination of a column index and aggregation
 type QueryColumn struct {
 	Index       int
-	Downsampler downsampling.Downsampler
+	Downsampler downsampling.Function
 }
 
 // Range represents a time range

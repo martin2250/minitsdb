@@ -39,7 +39,7 @@ type fpsInputColumn struct {
 // one is created for each QueryColumn
 type fpsOutputColumn struct {
 	IndexOuput  int // the index of this QueryColumn
-	Downsampler downsampling.Downsampler
+	Downsampler downsampling.Function
 }
 
 // read header and find first block that contains points within query range
@@ -210,7 +210,7 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 		// append downsampled values
 		for iInput, colInput := range s.columns {
 			for _, colOutput := range colInput.Outputs {
-				val := colOutput.Downsampler.DownsampleFirst(s.buffer.Values[iInput][0:indexEnd])
+				val := colOutput.Downsampler.AggregatePrimary(s.buffer.Values[iInput][0:indexEnd], s.buffer.Time[0:indexEnd])
 				output.Values[colOutput.IndexOuput] = append(output.Values[colOutput.IndexOuput], val)
 			}
 		}

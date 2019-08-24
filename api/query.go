@@ -178,8 +178,8 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	par := struct {
 		Series  map[string]string
 		Columns []struct {
-			Tags        map[string]string
-			Downsampler string
+			Tags     map[string]string
+			Function string
 		}
 		TimeStep  time.Duration
 		TimeStart int64
@@ -237,27 +237,18 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		queryColumns[i] = make([]series.QueryColumn, 0, len(par.Columns))
 
 		for _, pCol := range par.Columns { // loop over all column descriptions in the query
-			// find downsampler
-			var ds downsampling.Downsampler
+			// find function
+			var f downsampling.Function
 
-			switch pCol.Downsampler {
-			case "", "mean":
-				ds = downsampling.DownsamplerMean
-			case "min":
-				ds = downsampling.DownsamplerMin
-			case "max":
-				ds = downsampling.DownsamplerMax
-			case "first":
-				ds = downsampling.DownsamplerFirst
-			case "last":
-				ds = downsampling.DownsamplerLast
-			case "count":
-				ds = downsampling.DownsamplerCount
-			case "sum":
-				ds = downsampling.DownsamplerSum
-			default:
-				logHTTPError(w, r, "unknown downsampler", http.StatusBadRequest)
-				return
+			if pCol.Function == "" {
+				f = downsampling.Mean // todo: replace by column default downsampler
+			} else {
+				f, err = downsampling.FindFunction(pCol.Function)
+
+				if err != nil {
+					logHTTPError(w, r, err.Error(), http.StatusNotFound)
+					return
+				}
 			}
 
 			for _, iCol := range s.GetIndices(pCol.Tags) {
@@ -265,7 +256,7 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// also actually implement different downsamplers
 				queryColumns[i] = append(queryColumns[i], series.QueryColumn{
 					Index:       iCol,
-					Downsampler: ds,
+					Downsampler: f,
 				})
 			}
 		}
