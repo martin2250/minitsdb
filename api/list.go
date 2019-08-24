@@ -2,14 +2,13 @@ package api
 
 import (
 	"encoding/json"
-	"github.com/martin2250/minitsdb/database"
-	"github.com/martin2250/minitsdb/database/series"
+	"github.com/martin2250/minitsdb/minitsdb"
 	"io"
 	"net/http"
 )
 
 type handleList struct {
-	db *database.Database
+	db *minitsdb.Database
 }
 
 type handleListColumn struct {
@@ -35,10 +34,10 @@ func (h handleList) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// find series
-	var matches []*series.Series
+	var matches []*minitsdb.Series
 
 	if filter == nil {
-		matches = make([]*series.Series, len(h.db.Series))
+		matches = make([]*minitsdb.Series, len(h.db.Series))
 		for i := range h.db.Series {
 			matches[i] = &h.db.Series[i]
 		}

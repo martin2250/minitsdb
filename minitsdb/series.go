@@ -1,12 +1,13 @@
-package series
+package minitsdb
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/martin2250/minitsdb/database/series/downsampling"
-	"github.com/martin2250/minitsdb/database/series/storage"
-	"github.com/martin2250/minitsdb/database/series/storage/encoding"
+	"github.com/martin2250/minitsdb/minitsdb/downsampling"
+	"github.com/martin2250/minitsdb/minitsdb/storage"
+	"github.com/martin2250/minitsdb/minitsdb/storage/encoding"
+	. "github.com/martin2250/minitsdb/minitsdb/types"
 	"math"
 	"sync"
 	"time"

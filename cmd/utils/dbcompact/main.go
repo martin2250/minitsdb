@@ -3,12 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/martin2250/minitsdb/database/series/storage/encoding"
+	"github.com/martin2250/minitsdb/minitsdb/storage/encoding"
 	"io"
 	"log"
 	"os"
 
-	"github.com/martin2250/minitsdb/database/series/storage"
+	"github.com/martin2250/minitsdb/minitsdb/storage"
 )
 
 var opts struct {

@@ -1,18 +1,16 @@
-package database
+package minitsdb
 
 import (
 	"errors"
 	"io/ioutil"
 	"path"
-
-	"github.com/martin2250/minitsdb/database/series"
 )
 
 // NewDatabase creates a new database instance
 func NewDatabase(databasePath string) (Database, error) {
 	db := Database{
 		Path:   databasePath,
-		Series: make([]series.Series, 0),
+		Series: make([]Series, 0),
 	}
 
 	err := db.loadSeries()
@@ -37,7 +35,7 @@ func (db *Database) loadSeries() error {
 			continue
 		}
 
-		s, err := series.OpenSeries(path.Join(db.Path, file.Name()))
+		s, err := OpenSeries(path.Join(db.Path, file.Name()))
 
 		if err != nil {
 			return err

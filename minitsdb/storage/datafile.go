@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/martin2250/minitsdb/database/series/storage/encoding"
+	"github.com/martin2250/minitsdb/minitsdb/storage/encoding"
 	"github.com/martin2250/minitsdb/util"
 	"io"
 	"log"

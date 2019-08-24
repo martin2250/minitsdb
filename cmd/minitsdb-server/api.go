@@ -1,12 +1,11 @@
 package main
 
 import (
-	"github.com/martin2250/minitsdb/database"
-	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/ingest"
+	"github.com/martin2250/minitsdb/minitsdb"
 )
 
-func associatePoints(input <-chan ingest.Point, output chan<- series.AssociatedPoint, db *database.Database) {
+func associatePoints(input <-chan ingest.Point, output chan<- minitsdb.AssociatedPoint, db *minitsdb.Database) {
 	for {
 		p := <-input
 
@@ -20,7 +19,7 @@ func associatePoints(input <-chan ingest.Point, output chan<- series.AssociatedP
 			continue
 		}
 
-		output <- series.AssociatedPoint{
+		output <- minitsdb.AssociatedPoint{
 			Point:  ps,
 			Series: indices[0],
 		}

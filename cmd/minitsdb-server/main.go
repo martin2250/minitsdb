@@ -3,9 +3,9 @@ package main
 import (
 	"github.com/gorilla/mux"
 	"github.com/martin2250/minitsdb/api"
-	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/ingest"
 	"github.com/martin2250/minitsdb/ingest/pointlistener"
+	"github.com/martin2250/minitsdb/minitsdb"
 	"github.com/rossmcdonald/telegram_hook"
 	log "github.com/sirupsen/logrus"
 	"net/http"
@@ -54,7 +54,7 @@ func main() {
 
 	// ingestion
 	ingestPoints := make(chan ingest.Point, conf.IngestBufferCapacity)
-	associatedPoints := make(chan series.AssociatedPoint, conf.IngestBufferCapacity)
+	associatedPoints := make(chan minitsdb.AssociatedPoint, conf.IngestBufferCapacity)
 	for i := uint(0); i < conf.IngestionWorkerCount; i++ {
 		go associatePoints(ingestPoints, associatedPoints, &db)
 	}

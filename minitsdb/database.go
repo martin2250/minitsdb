@@ -1,20 +1,19 @@
-package database
+package minitsdb
 
 import (
 	"errors"
-	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/ingest"
 )
 
 // Database holds series from a database directory
 type Database struct {
 	Path   string
-	Series []series.Series
+	Series []Series
 }
 
 // FindSeries returns indices to all series that match the tagset
-func (db Database) FindSeries(tags map[string]string) []*series.Series {
-	matches := make([]*series.Series, 0)
+func (db Database) FindSeries(tags map[string]string) []*Series {
+	matches := make([]*Series, 0)
 
 	for i, series := range db.Series {
 		isMatch := true

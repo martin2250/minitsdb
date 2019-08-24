@@ -12,7 +12,7 @@ func testTransform(t *testing.T, tr Transformer) {
 	copy(inputCopy, input)
 
 	// apply transformation
-	encoded, err := tr.Apply(inputCopy)
+	encoded, err := Apply(inputCopy)
 
 	if err != nil {
 		t.Error(err)
@@ -28,7 +28,7 @@ func testTransform(t *testing.T, tr Transformer) {
 	}
 
 	// revert transformation
-	decoded, err := tr.Revert(encoded)
+	decoded, err := Revert(encoded)
 
 	if err != nil {
 		t.Error(err)

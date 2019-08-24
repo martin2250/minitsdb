@@ -1,8 +1,9 @@
-package series
+package minitsdb
 
 import (
-	"github.com/martin2250/minitsdb/database/series/downsampling"
-	"github.com/martin2250/minitsdb/database/series/storage"
+	"github.com/martin2250/minitsdb/minitsdb/downsampling"
+	"github.com/martin2250/minitsdb/minitsdb/storage"
+	. "github.com/martin2250/minitsdb/minitsdb/types"
 	"io"
 )
 
@@ -10,23 +11,6 @@ import (
 type QueryColumn struct {
 	Index       int
 	Downsampler downsampling.Function
-}
-
-// Range represents a time range
-type TimeRange struct {
-	Start int64
-	End   int64
-}
-
-func (r TimeRange) ContainsRange(other TimeRange) bool {
-	return other.End <= r.End && other.Start >= r.Start
-}
-func (r TimeRange) Contains(time int64) bool {
-	return r.Start <= time && time <= r.End
-}
-
-func (r TimeRange) Overlaps(other TimeRange) bool {
-	return r.Contains(other.Start) || r.Contains(other.End) || other.ContainsRange(r)
 }
 
 type Parameters struct {

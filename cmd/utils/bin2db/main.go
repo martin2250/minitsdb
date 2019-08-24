@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"github.com/martin2250/minitsdb/database/series/storage/encoding"
+	"github.com/martin2250/minitsdb/minitsdb/storage/encoding"
 	"io"
 	"log"
 	"os"

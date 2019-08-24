@@ -1,7 +1,7 @@
 package storage
 
 import (
-	"github.com/martin2250/minitsdb/database/series/storage/encoding"
+	"github.com/martin2250/minitsdb/minitsdb/storage/encoding"
 	"io"
 )
 

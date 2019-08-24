@@ -1,4 +1,4 @@
-package series
+package minitsdb
 
 import (
 	"errors"

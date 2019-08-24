@@ -4,10 +4,10 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/martin2250/minitsdb/database"
-	"github.com/martin2250/minitsdb/database/series"
-	"github.com/martin2250/minitsdb/database/series/downsampling"
-	"github.com/martin2250/minitsdb/database/series/storage"
+	"github.com/martin2250/minitsdb/minitsdb"
+	"github.com/martin2250/minitsdb/minitsdb/downsampling"
+	"github.com/martin2250/minitsdb/minitsdb/storage"
+	. "github.com/martin2250/minitsdb/minitsdb/types"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 	"io"
@@ -19,13 +19,13 @@ import (
 
 // handleQuery is the HTTP handler for grafana queries
 type handleQuery struct {
-	db *database.Database
+	db *minitsdb.Database
 
 	requests    map[seriesRequestParams]*seriesRequest
 	mutRequests sync.Mutex
 }
 
-func newHandleQuery(db *database.Database) *handleQuery {
+func newHandleQuery(db *minitsdb.Database) *handleQuery {
 	return &handleQuery{
 		db:          db,
 		requests:    make(map[seriesRequestParams]*seriesRequest),
@@ -34,7 +34,7 @@ func newHandleQuery(db *database.Database) *handleQuery {
 }
 
 type seriesRequestParams struct {
-	s *series.Series
+	s *minitsdb.Series
 	// query params
 	timeStep  int64
 	timeStart int64
@@ -66,7 +66,7 @@ type seriesRequest struct {
 	// the receivers
 	receivers []seriesRequestReceiver
 	// columns to be read (unordered)
-	columns []series.QueryColumn
+	columns []minitsdb.QueryColumn
 }
 
 type seriesInfo struct {
@@ -112,10 +112,10 @@ func (r *seriesRequest) Execute() error {
 		"columns":   len(r.columns),
 	}).Info("Executing series request")
 
-	q := r.params.s.Query(series.Parameters{
+	q := r.params.s.Query(minitsdb.Parameters{
 		TimeStep: r.params.timeStep,
 		Columns:  r.columns,
-	}, series.TimeRange{
+	}, TimeRange{
 		Start: r.params.timeStart,
 		End:   r.params.timeEnd,
 	})
@@ -232,10 +232,10 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// construct query columns for each series
-	queryColumns := make([][]series.QueryColumn, len(matches))
+	queryColumns := make([][]minitsdb.QueryColumn, len(matches))
 
 	for i, s := range matches { // loop over all series that match the query
-		queryColumns[i] = make([]series.QueryColumn, 0, len(par.Columns))
+		queryColumns[i] = make([]minitsdb.QueryColumn, 0, len(par.Columns))
 
 		for _, pCol := range par.Columns { // loop over all column descriptions in the query
 			for _, iCol := range s.GetIndices(pCol.Tags) {
@@ -256,7 +256,7 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 				// todo: check if column supports downsampler, else skip; don't error
 				// also actually implement different downsamplers
-				queryColumns[i] = append(queryColumns[i], series.QueryColumn{
+				queryColumns[i] = append(queryColumns[i], minitsdb.QueryColumn{
 					Index:       iCol,
 					Downsampler: f,
 				})
@@ -288,7 +288,7 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			request = &seriesRequest{
 				params:    srp,
 				receivers: make([]seriesRequestReceiver, 0, 1),
-				columns:   make([]series.QueryColumn, 0, len(columnsMatch)),
+				columns:   make([]minitsdb.QueryColumn, 0, len(columnsMatch)),
 			}
 
 			if par.Wait {
