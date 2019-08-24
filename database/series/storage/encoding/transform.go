@@ -1,5 +1,9 @@
 package encoding
 
+import (
+	"fmt"
+)
+
 // a transformer encodes a list of signed integer values to unsigned values which can be fed into simple8b
 type Transformer interface {
 	Apply(input []int64) ([]uint64, error)
@@ -59,4 +63,16 @@ func (t DiffTransformer) Revert(input []uint64) ([]int64, error) {
 	}
 
 	return d, nil
+}
+
+func FindTransformer(s string) (Transformer, error) {
+	var arg int
+	if _, err := fmt.Sscanf(s, "D%d", &arg); err != nil {
+		if arg < 0 || arg > 3 {
+			return nil, fmt.Errorf("%d is outside the allowed range for a diff transformer", arg)
+		}
+		return DiffTransformer{N: arg}, nil
+	} else {
+		return nil, fmt.Errorf("%s matches no known transformers", s)
+	}
 }

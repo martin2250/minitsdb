@@ -11,6 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 	"io"
+	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -269,6 +270,8 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.mutRequests.Lock()
 
+	var request *seriesRequest
+
 	for indexMatch, columnsMatch := range queryColumns {
 		// create seriesRequest, if it doesn't exists
 		srp := seriesRequestParams{
@@ -277,7 +280,8 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			timeStart: par.TimeStart,
 			timeEnd:   par.TimeEnd,
 		}
-		request, ok := h.requests[srp]
+		var ok bool
+		request, ok = h.requests[srp]
 
 		// if none was found, create one
 		if !ok {
@@ -388,10 +392,12 @@ func (h *handleQuery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, i := range columnMaps[result.index] {
+			dec := matches[result.index].Columns[request.columns[i].Index].Decimals
+			fac := math.Pow10(-dec)
 			valuesf := make([]float64, result.data.Len())
 			for j := range valuesf {
 				// todo: find number of decimal places
-				valuesf[j] = float64(result.data.Values[i][j])
+				valuesf[j] = float64(result.data.Values[i][j]) * fac
 			}
 			err = binary.Write(w, binary.LittleEndian, valuesf)
 
