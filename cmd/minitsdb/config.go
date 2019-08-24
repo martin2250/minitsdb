@@ -21,6 +21,12 @@ type Configuration struct {
 	IngestionWorkerCount uint
 
 	ShutdownTimeout time.Duration
+
+	Telegram *struct {
+		AppName   string
+		AuthToken string
+		ChatID    string
+	}
 }
 
 // readConfigurationFile does what the name implies

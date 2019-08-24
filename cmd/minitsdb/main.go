@@ -6,6 +6,7 @@ import (
 	"github.com/martin2250/minitsdb/database/series"
 	"github.com/martin2250/minitsdb/ingest"
 	"github.com/martin2250/minitsdb/ingest/pointlistener"
+	"github.com/rossmcdonald/telegram_hook"
 	log "github.com/sirupsen/logrus"
 	"net/http"
 	"time"
@@ -28,6 +29,20 @@ func main() {
 	conf := readConfigurationFile(opts.ConfigPath)
 	if conf.DatabasePath != "" {
 		opts.DatabasePath = conf.DatabasePath
+	}
+
+	if conf.Telegram != nil {
+		hook, err := telegram_hook.NewTelegramHook(
+			conf.Telegram.AppName,
+			conf.Telegram.AuthToken,
+			conf.Telegram.ChatID,
+			telegram_hook.WithAsync(true),
+			telegram_hook.WithTimeout(30*time.Second),
+		)
+		if err != nil {
+			log.WithError(err).Fatalf("failed to create telegram log hook")
+		}
+		log.AddHook(hook)
 	}
 
 	// shutdown
