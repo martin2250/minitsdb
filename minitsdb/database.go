@@ -3,6 +3,8 @@ package minitsdb
 import (
 	"errors"
 	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
+	"regexp"
+	"strings"
 )
 
 // Database holds series from a database directory
@@ -11,8 +13,9 @@ type Database struct {
 	Series []Series
 }
 
-// FindSeries returns indices to all series that match the tagset
-func (db Database) FindSeries(tags map[string]string) []*Series {
+// FindSeries finds all series that match the given set of tags
+// if useRegex is true, all tag values of format /.../ as treated as regexes
+func (db Database) FindSeries(tags map[string]string, useRegex bool) []*Series {
 	matches := make([]*Series, 0)
 
 	for i, series := range db.Series {
@@ -25,8 +28,12 @@ func (db Database) FindSeries(tags map[string]string) []*Series {
 				break
 			}
 
-			//ok, _ = regexp.MatchString(queryValue, seriesValue)
-			ok = queryValue == seriesValue
+			if useRegex && strings.HasPrefix(queryValue, "/") && strings.HasSuffix(queryValue, "/") {
+				ok, _ = regexp.MatchString(queryValue[1:len(queryValue)-1], seriesValue)
+			} else {
+				ok = queryValue == seriesValue
+			}
+
 			if !ok {
 				isMatch = false
 				break
@@ -50,7 +57,7 @@ var ErrSeriesUnknown = errors.New("value doesn't match any series")
 // InsertPoint finds a matching series and tries to insert the point
 // todo: move this somewhere else, db is only used once
 func (db *Database) InsertPoint(p ingest.Point) error {
-	indices := db.FindSeries(p.Tags)
+	indices := db.FindSeries(p.Tags, false)
 
 	if len(indices) == 0 {
 		return ErrSeriesUnknown

@@ -113,6 +113,8 @@ LoopMain:
 		}
 	}
 
+	// todo: shut down ingestion pipeline in order
+
 	log.Info("Flushing buffers")
 
 	for _, s := range db.Series {

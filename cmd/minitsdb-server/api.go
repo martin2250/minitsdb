@@ -6,10 +6,8 @@ import (
 )
 
 func associatePoints(input <-chan ingest.Point, output chan<- minitsdb.AssociatedPoint, db *minitsdb.Database) {
-	for {
-		p := <-input
-
-		indices := db.FindSeries(p.Tags)
+	for p := range input {
+		indices := db.FindSeries(p.Tags, false)
 		if len(indices) != 1 {
 			continue
 		}
