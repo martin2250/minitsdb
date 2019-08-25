@@ -9,8 +9,8 @@ import (
 
 // QueryColumn is the combination of a column index and aggregation
 type QueryColumn struct {
-	Index       int
-	Downsampler downsampling.Function
+	Column   *Column
+	Function downsampling.Function
 }
 
 type Parameters struct {

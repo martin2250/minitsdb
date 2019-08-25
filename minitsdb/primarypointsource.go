@@ -262,7 +262,7 @@ func NewFirstPointSource(s *Series, timeRange *TimeRange, queryColumns []QueryCo
 		if exists {
 			inputCol.Outputs = append(inputCol.Outputs, fpsOutputColumn{
 				IndexOuput:  i,
-				Downsampler: queryCol.Downsampler,
+				Downsampler: queryCol.Function,
 			})
 		} else {
 			inputColumns[queryCol.Index] = &fpsInputColumn{
@@ -270,7 +270,7 @@ func NewFirstPointSource(s *Series, timeRange *TimeRange, queryColumns []QueryCo
 				Transformer: s.Columns[queryCol.Index].Transformer,
 				Outputs: []fpsOutputColumn{{
 					IndexOuput:  i,
-					Downsampler: queryCol.Downsampler,
+					Downsampler: queryCol.Function,
 				}},
 			}
 			decoderColumns = append(decoderColumns, queryCol.Index+1)

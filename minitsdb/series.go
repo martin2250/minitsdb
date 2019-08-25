@@ -9,6 +9,8 @@ import (
 	"github.com/martin2250/minitsdb/minitsdb/storage/encoding"
 	. "github.com/martin2250/minitsdb/minitsdb/types"
 	"math"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +32,19 @@ type Column struct {
 	// type registered to the system. Unused downsampling types have index 0
 	// IndexSecondary starts at two to account for time and count columns
 	IndexSecondary []int
+
+	DefaultFunction downsampling.Function
+}
+
+func (c Column) Supports(f downsampling.Function) bool {
+	need := make([]bool, downsampling.AggregatorCount)
+	f.Needs(need)
+	for i, n := range need {
+		if n && c.IndexSecondary[i] == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // Series describes a time series, id'd by a name and tags
@@ -139,6 +154,7 @@ func (s *Series) InsertPoint(p storage.Point) error {
 
 // GetIndices returns the indices of all columns that match the given set of tags
 // the values of argument 'tags' are used as regex to match against all columns
+// todo: deprecate
 func (s Series) GetIndices(tags map[string]string) []int {
 	indices := make([]int, 0)
 
@@ -166,6 +182,34 @@ func (s Series) GetIndices(tags map[string]string) []int {
 	}
 
 	return indices
+}
+
+// FindColumns finds all columns that match the given set of tags
+// if useRegex is true, all tag values of format /.../ as treated as regexes
+func (s Series) FindColumns(tags map[string]string, useRegex bool) []*Column {
+	columns := make([]*Column, 0)
+Top:
+	for i, column := range s.Columns {
+		for queryKey, queryValue := range tags {
+			columnValue, ok := column.Tags[queryKey]
+			if !ok {
+				continue Top
+			}
+
+			if useRegex && strings.HasPrefix(queryValue, "/") && strings.HasSuffix(queryValue, "/") {
+				ok, _ = regexp.MatchString(queryValue[1:len(queryValue)-1], columnValue)
+			} else {
+				ok = queryValue == columnValue
+			}
+
+			if !ok {
+				continue Top
+			}
+		}
+		columns = append(columns, &s.Columns[i])
+	}
+
+	return columns
 }
 
 func (s *Series) addColumn(conf YamlColumnConfig, indexPrimary, indexSecondary *int) error {
