@@ -85,3 +85,14 @@ func IndexOfInt64(column []int64, element int64) int {
 	}
 	return -1
 }
+
+// IndexOfInt returns the index of the first element of 'column' that matches 'element'
+// returns -1 if no element matches
+func IndexOfInt(a []int, element int) int {
+	for i, ct := range a {
+		if element == ct {
+			return i
+		}
+	}
+	return -1
+}

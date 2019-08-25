@@ -1,7 +1,6 @@
 package minitsdb
 
 import (
-	"github.com/martin2250/minitsdb/minitsdb/downsampling"
 	"github.com/martin2250/minitsdb/minitsdb/storage"
 	"github.com/martin2250/minitsdb/minitsdb/storage/encoding"
 	. "github.com/martin2250/minitsdb/minitsdb/types"
@@ -11,10 +10,14 @@ import (
 	"sort"
 )
 
-// todo: rename this mf
-// FirstPointSource reads and aggregates points from the first bucket of a series and RAM
+type IndexedQueryColumn struct {
+	Index       int // the index of this column in the file decoder
+	QueryColumn QueryColumn
+}
+
+// PrimaryQuerySource reads and aggregates points from the first bucket of a series and RAM
 // this is separate from highpointsource (needs renaming even more than this), as both the first bucket and ram don't have pre-downsampled values
-type FirstPointSource struct {
+type PrimaryQuerySource struct {
 	timeRange     *TimeRange
 	timeStep      int64
 	timeStepInput int64
@@ -22,29 +25,14 @@ type FirstPointSource struct {
 	buffer storage.PointBuffer
 	reader storage.FileDecoder
 
-	ramvalues *storage.PointBuffer
+	ramvalues   *storage.PointBuffer
+	ramvaluemap []int
 
-	columns           []fpsInputColumn
-	outputColumnCount int
-}
-
-// holds information about the columns stored on disk which should be retrieved
-// index on disk is not needed as it's used as map index
-type fpsInputColumn struct {
-	IndexFile   int
-	Transformer encoding.Transformer
-	Outputs     []fpsOutputColumn
-}
-
-// holds information about a column that was requested by a query
-// one is created for each QueryColumn
-type fpsOutputColumn struct {
-	IndexOuput  int // the index of this QueryColumn
-	Downsampler downsampling.Function
+	columns []IndexedQueryColumn
 }
 
 // read header and find first block that contains points within query range
-func (s *FirstPointSource) readHeadersUntil() error {
+func (s *PrimaryQuerySource) readHeadersUntil() error {
 	header := encoding.BlockHeader{
 		TimeLast: math.MinInt64,
 	}
@@ -66,7 +54,7 @@ func (s *FirstPointSource) readHeadersUntil() error {
 	return nil
 }
 
-func (s *FirstPointSource) readIntoBuffer() error {
+func (s *PrimaryQuerySource) readIntoBuffer() error {
 	decoded, err := s.reader.DecodeBlock()
 
 	if err != nil {
@@ -81,7 +69,7 @@ func (s *FirstPointSource) readIntoBuffer() error {
 
 	valuesNew := make([][]int64, len(decoded)-1)
 	for i, d := range decoded[1:] {
-		valuesNew[i], err = s.columns[i].Transformer.Revert(d)
+		valuesNew[i], err = s.columns[i].QueryColumn.Column.Transformer.Revert(d)
 		if err != nil {
 			return err
 		}
@@ -104,7 +92,7 @@ func (s *FirstPointSource) readIntoBuffer() error {
 //
 //}
 
-func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
+func (s *PrimaryQuerySource) Next() (storage.PointBuffer, error) {
 	if s.timeRange == nil {
 		return storage.PointBuffer{}, io.EOF
 	}
@@ -136,12 +124,11 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 	if isEOF {
 		// append RAM values if bucket reader is at end
 		// loop over all points in RAM
-		// todo: change this to insert
 		for i, t := range s.ramvalues.Time {
 			if s.timeRange.Contains(t) {
 				index := s.buffer.InsertIndex(t)
-				for ic, c := range s.columns {
-					s.buffer.Values[ic][index] = s.ramvalues.Values[c.IndexFile][i]
+				for ib, ir := range s.ramvaluemap {
+					s.buffer.Values[ib][index] = s.ramvalues.Values[ir][i]
 				}
 			}
 		}
@@ -150,7 +137,7 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 	// create output array
 	output := storage.PointBuffer{
 		Time:   make([]int64, 0),
-		Values: make([][]int64, s.outputColumnCount),
+		Values: make([][]int64, len(s.columns)),
 	}
 
 	for i := range output.Values {
@@ -209,11 +196,9 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 		// append time of point to output
 		output.Time = append(output.Time, currentTimeStep.Start)
 		// append downsampled values
-		for iInput, colInput := range s.columns {
-			for _, colOutput := range colInput.Outputs {
-				val := colOutput.Downsampler.AggregatePrimary(s.buffer.Values[iInput][0:indexEnd], s.buffer.Time[0:indexEnd])
-				output.Values[colOutput.IndexOuput] = append(output.Values[colOutput.IndexOuput], val)
-			}
+		for i, indexedQueryColumn := range s.columns {
+			val := indexedQueryColumn.QueryColumn.Function.AggregatePrimary(s.buffer.Values[indexedQueryColumn.Index][0:indexEnd], s.buffer.Time[0:indexEnd])
+			output.Values[i] = append(output.Values[i], val)
 		}
 
 		// update query range
@@ -240,7 +225,7 @@ func (s *FirstPointSource) Next() (storage.PointBuffer, error) {
 // NewFirstPointSource creates a new fps and initializes the bucket reader
 // valuesRAM: points that are stored in series.Values
 // params.TimeStart gets adjusted to reflect the values already read
-func NewFirstPointSource(s *Series, timeRange *TimeRange, queryColumns []QueryColumn, timeStep int64) FirstPointSource {
+func NewFirstPointSource(s *Series, timeRange *TimeRange, queryColumns []QueryColumn, timeStep int64) PrimaryQuerySource {
 	// create list of relevant files
 	relevantFiles := make([]*storage.DataFile, 0, 8)
 
@@ -252,32 +237,29 @@ func NewFirstPointSource(s *Series, timeRange *TimeRange, queryColumns []QueryCo
 	}
 
 	// determine which columns need to be decoded
-	// todo: rename most of this
-	inputColumns := make(map[int]*fpsInputColumn)
-	decoderColumns := []int{0}
-
-	for i, queryCol := range queryColumns {
-		inputCol, exists := inputColumns[queryCol.Index]
-
-		if exists {
-			inputCol.Outputs = append(inputCol.Outputs, fpsOutputColumn{
-				IndexOuput:  i,
-				Downsampler: queryCol.Function,
-			})
-		} else {
-			inputColumns[queryCol.Index] = &fpsInputColumn{
-				IndexFile:   queryCol.Index,
-				Transformer: s.Columns[queryCol.Index].Transformer,
-				Outputs: []fpsOutputColumn{{
-					IndexOuput:  i,
-					Downsampler: queryCol.Function,
-				}},
-			}
-			decoderColumns = append(decoderColumns, queryCol.Index+1)
-		}
+	decoderColumnsSet := make(map[int]struct{}, len(s.Columns))
+	for _, queryCol := range queryColumns {
+		decoderColumnsSet[queryCol.Column.IndexPrimary] = struct{}{}
 	}
 
+	ramvaluemap := make([]int, 0, len(decoderColumnsSet))
+	decoderColumns := make([]int, 1, len(decoderColumnsSet)+1)
+	decoderColumns[0] = 0 // always decode time
+	for i := range decoderColumnsSet {
+		decoderColumns = append(decoderColumns, i)
+		ramvaluemap = append(ramvaluemap, i-1)
+	}
 	sort.Ints(decoderColumns)
+	sort.Ints(ramvaluemap)
+
+	//
+	indexedColumns := make([]IndexedQueryColumn, len(queryColumns))
+	for i, queryCol := range queryColumns {
+		indexedColumns[i] = IndexedQueryColumn{
+			Index:       util.IndexOfInt(decoderColumns, queryCol.Column.IndexPrimary) - 1,
+			QueryColumn: queryCol,
+		}
+	}
 
 	// fix parameter times to make further roundin operations unnecessary
 	// todo: this should probably be somewhere else
@@ -288,24 +270,18 @@ func NewFirstPointSource(s *Series, timeRange *TimeRange, queryColumns []QueryCo
 	timeRange.End = util.RoundDown(timeRange.End, timeStep) + timeStep - 1
 
 	// create point source struct
-	src := FirstPointSource{
+	src := PrimaryQuerySource{
 		timeRange:     timeRange,
 		timeStep:      timeStep,
 		timeStepInput: s.FirstBucket.TimeResolution,
 
-		buffer: storage.NewPointBuffer(len(inputColumns)),
+		buffer: storage.NewPointBuffer(len(decoderColumnsSet)),
 		reader: storage.NewFileDecoder(relevantFiles, decoderColumns),
 
-		ramvalues: &s.Buffer,
+		ramvalues:   &s.Buffer,
+		ramvaluemap: ramvaluemap,
 
-		columns:           make([]fpsInputColumn, len(inputColumns)),
-		outputColumnCount: 0,
-	}
-
-	// copy over columns
-	for indexInputCol, indexFile := range decoderColumns[1:] {
-		src.columns[indexInputCol] = *inputColumns[indexFile-1]
-		src.outputColumnCount += len(inputColumns[indexFile-1].Outputs)
+		columns: indexedColumns,
 	}
 
 	return src

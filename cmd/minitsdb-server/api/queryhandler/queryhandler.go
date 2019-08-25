@@ -14,6 +14,11 @@ type queryHandler struct {
 	mux            sync.Mutex
 }
 
-func New() queryHandler {
-	return queryHandler{}
+func New(db *minitsdb.Database, log *log.Logger) *queryHandler {
+	return &queryHandler{
+		db:             db,
+		log:            log,
+		pendingQueries: make(map[QueryClusterParameters]*QueryCluster),
+		mux:            sync.Mutex{},
+	}
 }

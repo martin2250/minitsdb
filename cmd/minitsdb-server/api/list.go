@@ -42,7 +42,7 @@ func (h handleList) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			matches[i] = &h.db.Series[i]
 		}
 	} else {
-		matches = h.db.FindSeries(filter)
+		matches = h.db.FindSeries(filter, true)
 	}
 
 	// encode series

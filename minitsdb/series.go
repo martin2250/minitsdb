@@ -214,10 +214,8 @@ Top:
 
 func (s *Series) addColumn(conf YamlColumnConfig, indexPrimary, indexSecondary *int) error {
 	col := Column{
-		Decimals:     conf.Decimals,
-		IndexPrimary: *indexPrimary,
+		Decimals: conf.Decimals,
 	}
-	*indexPrimary++
 
 	// find transformer
 	if conf.Transformer == "" {
@@ -254,6 +252,8 @@ func (s *Series) addColumn(conf YamlColumnConfig, indexPrimary, indexSecondary *
 		dcol := col
 		dcol.Tags = map[string]string{}
 		dcol.IndexSecondary = make([]int, downsampling.AggregatorCount)
+		dcol.IndexPrimary = *indexPrimary
+		*indexPrimary++
 
 		for i, need := range needs {
 			if need {

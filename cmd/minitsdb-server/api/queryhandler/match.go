@@ -5,12 +5,12 @@ import (
 	"github.com/martin2250/minitsdb/minitsdb/downsampling"
 )
 
-func queriesFromDescription(db *minitsdb.Database, desc queryDescription) ([]Query, error) {
-	var queries []Query
+func queriesFromDescription(db *minitsdb.Database, desc queryDescription) ([]SubQuery, error) {
+	var queries []SubQuery
 
 	// find matching series in the database
 	for _, series := range db.FindSeries(desc.Series, true) {
-		query := Query{
+		query := SubQuery{
 			Series: series,
 		}
 
@@ -31,7 +31,8 @@ func queriesFromDescription(db *minitsdb.Database, desc queryDescription) ([]Que
 					}
 
 					if colspec.Function == "" {
-						qc.Function = column.DefaultFunction
+						//qc.Function = column.DefaultFunction
+						qc.Function = downsampling.Mean
 					} else {
 						var err error
 						qc.Function, err = downsampling.FindFunction(colspec.Function)
@@ -45,6 +46,9 @@ func queriesFromDescription(db *minitsdb.Database, desc queryDescription) ([]Que
 					}
 				}
 			}
+		}
+		if len(query.Columns) != 0 {
+			queries = append(queries, query)
 		}
 	}
 

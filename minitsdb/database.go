@@ -57,7 +57,7 @@ var ErrSeriesUnknown = errors.New("value doesn't match any series")
 // InsertPoint finds a matching series and tries to insert the point
 // todo: move this somewhere else, db is only used once
 func (db *Database) InsertPoint(p ingest.Point) error {
-	indices := db.FindSeries(p.Tags)
+	indices := db.FindSeries(p.Tags, false)
 
 	if len(indices) == 0 {
 		return ErrSeriesUnknown

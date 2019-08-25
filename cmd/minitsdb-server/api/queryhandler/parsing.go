@@ -2,7 +2,6 @@ package queryhandler
 
 import (
 	"errors"
-	"github.com/martin2250/minitsdb/util"
 	"gopkg.in/yaml.v3"
 	"io"
 	"time"
