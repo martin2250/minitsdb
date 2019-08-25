@@ -2,6 +2,7 @@ package queryhandler
 
 import (
 	"errors"
+	"github.com/martin2250/minitsdb/util"
 	"gopkg.in/yaml.v3"
 	"io"
 	"time"
@@ -13,7 +14,8 @@ type queryDescription struct {
 		Tags     map[string]string
 		Function string
 	}
-	TimeStep  time.Duration
+	TimeStep  string
+	timeStep  time.Duration // todo: replace this with a prettier solution
 	TimeStart int64
 	TimeEnd   int64
 	Wait      bool
@@ -41,7 +43,14 @@ func parseQuery(r io.Reader) (queryDescription, error) {
 		}
 	}
 
-	if desc.TimeStep < 1*time.Second {
+	var err error
+	desc.timeStep, err = util.ParseDuration(desc.TimeStep)
+
+	if err != nil {
+		return queryDescription{}, err
+	}
+
+	if desc.timeStep < 1*time.Second {
 		return queryDescription{}, errors.New("time step smaller than 1s")
 	}
 
