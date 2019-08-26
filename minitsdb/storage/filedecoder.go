@@ -76,14 +76,14 @@ func (d *FileDecoder) Close() {
 	}
 }
 
-func NewFileDecoder(files []*DataFile, columns []int) FileDecoder {
+func NewFileDecoder(files []*DataFile, need []bool) FileDecoder {
 	f := FileDecoder{
 		files:       files,
 		decoder:     encoding.NewDecoder(),
 		currentFile: nil,
 	}
 
-	f.decoder.Columns = columns
+	f.decoder.Need = need
 
 	return f
 }

@@ -35,7 +35,7 @@ type QueryClusterParameters struct {
 // into a single query, which reduces load on the server
 type QueryCluster struct {
 	Parameters QueryClusterParameters
-	SubQueries []SubQuery
+	SubQueries []*SubQuery
 }
 
 func (c *QueryCluster) Execute() error {

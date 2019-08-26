@@ -5,8 +5,8 @@ import (
 	"github.com/martin2250/minitsdb/minitsdb/downsampling"
 )
 
-func queriesFromDescription(db *minitsdb.Database, desc queryDescription) ([]SubQuery, error) {
-	var queries []SubQuery
+func queriesFromDescription(db *minitsdb.Database, desc queryDescription) ([]*SubQuery, error) {
+	var queries []*SubQuery
 
 	// find matching series in the database
 	for _, series := range db.FindSeries(desc.Series, true) {
@@ -48,7 +48,7 @@ func queriesFromDescription(db *minitsdb.Database, desc queryDescription) ([]Sub
 			}
 		}
 		if len(query.Columns) != 0 {
-			queries = append(queries, query)
+			queries = append(queries, &query)
 		}
 	}
 

@@ -23,8 +23,8 @@ type Decoder struct {
 	Header BlockHeader
 	reader io.Reader
 	s      decoderState
-	// Columns contains a sorted list of columns that should be read
-	Columns     []int
+	// need is true for every column that should be decoded
+	Need        []bool
 	block       []byte
 	blockReader bytes.Reader
 }
@@ -97,8 +97,12 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 		}
 	}
 
-	values := make([][]uint64, len(d.Columns))
+	// check header
+	if d.Header.NumColumns != len(d.Need) {
+		return nil, errors.New("Block contains different number of columns than expected ")
+	}
 
+	// read the data into words
 	words := make([]uint64, 512-3)
 	if err := binary.Read(&d.blockReader, binary.LittleEndian, words); err != nil {
 		d.s = stateError
@@ -106,21 +110,12 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 	}
 
 	// number of columns read from the block
-	colsRead := 0
+	values := make([][]uint64, d.Header.NumColumns)
 	var buf [240]uint64
 
-	for i, col := range d.Columns {
-		// check if file even contains this column
-		if col >= d.Header.NumColumns {
-			d.s = stateError
-			return nil, errors.New("not enough columns in block")
-		}
-		if col < colsRead {
-			return nil, errors.New("decoder columns are not in order")
-		}
+	for i, need := range d.Need {
 		// skip columns that are not required
-		for colsRead < col {
-			// number of points read from this column
+		if !need {
 			var pointsRead int
 			for pointsRead < d.Header.NumPoints {
 				// check if there are words left in this block
@@ -128,10 +123,9 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 					d.s = stateError
 					return nil, errors.New("column not complete at end of block")
 				}
-				// check how many values this word contains
 				var encoded uint64
 				encoded, words = words[0], words[1:]
-
+				// check how many values this word contains
 				c, err := simple8b.Count(encoded)
 				if err != nil {
 					d.s = stateError
@@ -139,7 +133,7 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 				}
 				pointsRead += c
 			}
-			colsRead++
+			continue
 		}
 
 		values[i] = make([]uint64, d.Header.NumPoints)
@@ -166,7 +160,6 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 			// add c to pointsRead after copy
 			pointsRead += c
 		}
-		colsRead++
 	}
 
 	d.s = stateHeader

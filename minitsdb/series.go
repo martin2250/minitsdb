@@ -395,9 +395,9 @@ func (s *Series) checkFirstBucket() error {
 	}
 
 	// fill decoder columns
-	d.Columns = make([]int, header.NumColumns)
-	for i := range d.Columns {
-		d.Columns[i] = i
+	d.Need = make([]bool, len(s.Columns)+1)
+	for i := range d.Need {
+		d.Need[i] = true
 	}
 
 	// read values from last block
