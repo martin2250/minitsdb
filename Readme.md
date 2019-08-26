@@ -1,4 +1,4 @@
-# MiniTSDB
+# miniTSDB
 
 ## Threading Model
 All Database related operations happen in the main program loop.
@@ -28,3 +28,11 @@ The http writer is passed to the main loop.
 - 1s/1week -> 604800 points
 - 30s/30weeks -> 604800 points
 - 15m/900weeks -> 604800 points
+
+### folder structure
+- database:
+  helper functions for managing series
+  - series:
+    everything related to storing and loading points
+    - storage:
+      storing points on disk, unaware of columns etc.
