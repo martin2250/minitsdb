@@ -16,6 +16,7 @@ type DiffTransformer struct {
 }
 
 var TimeTransformer = DiffTransformer{N: 2}
+var CountTransformer = DiffTransformer{N: 1}
 
 func (t DiffTransformer) Apply(input []int64) ([]uint64, error) {
 	// make a copy of input array, else input gets modified in the calling method

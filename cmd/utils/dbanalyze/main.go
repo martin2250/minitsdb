@@ -17,7 +17,7 @@ var opts struct {
 }
 
 func init() {
-	flag.StringVar(&opts.pathInput, "input", "../../data.base", "input file")
+	flag.StringVar(&opts.pathInput, "input", "", "input file")
 
 	flag.Parse()
 }

@@ -27,7 +27,7 @@ type Query struct {
 	Param     Parameters
 	TimeRange TimeRange
 	// todo: change this, this should not be public
-	Sources []PointSource
+	Sources []BucketQuerySource
 }
 
 func (q *Query) ReadNext() (storage.PointBuffer, error) {
@@ -36,15 +36,17 @@ func (q *Query) ReadNext() (storage.PointBuffer, error) {
 			return storage.PointBuffer{}, io.EOF
 		}
 
-		buffer, err := q.Sources[0].Next()
+		i := len(q.Sources) - 1
+
+		buffer, err := q.Sources[i].Next()
 
 		if err == nil {
 			return buffer, nil
 		} else {
-			q.Sources = q.Sources[1:]
 			if err != io.EOF {
 				return storage.PointBuffer{}, err
 			}
+			q.Sources = q.Sources[:i]
 		}
 	}
 }

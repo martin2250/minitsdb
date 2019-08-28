@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
+	"os"
 )
 
 type CommandLineOptions struct {
@@ -16,6 +17,13 @@ type CommandLineOptions struct {
 func readCommandLineOptions() CommandLineOptions {
 	opts := CommandLineOptions{}
 	_, err := flags.Parse(&opts)
+
+	switch errt := err.(type) {
+	case *flags.Error:
+		if errt.Type == flags.ErrHelp {
+			os.Exit(0)
+		}
+	}
 
 	if err != nil {
 		log.WithError(err).Fatal("could not parse command line arguments")

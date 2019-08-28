@@ -57,6 +57,15 @@ var Aggregators = map[string]Aggregator{
 	"mean":  Mean,
 }
 
+var AggregatorList = []Aggregator{
+	First,
+	Last,
+	Min,
+	Max,
+	Sum,
+	Mean,
+}
+
 var AggregatorCount = len(Aggregators)
 
 // functions
