@@ -124,7 +124,7 @@ func (s *PrimaryQuerySource) Next() (storage.PointBuffer, error) {
 	}
 
 	// re-use array to reduce allocations
-	if s.bufferIndexStart >= len(s.buffer) {
+	if s.bufferIndexStart >= len(s.buffer[0]) {
 		s.bufferIndexStart = 0
 	} else if s.bufferIndexStart > 2*cap(s.buffer[0])/3 {
 		for _, i := range s.needIndex {
