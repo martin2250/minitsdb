@@ -27,6 +27,8 @@ type Decoder struct {
 	Need        []bool
 	block       []byte
 	blockReader bytes.Reader
+
+	buffer [240]uint64
 }
 
 func NewDecoder() Decoder {
@@ -111,7 +113,6 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 
 	// number of columns read from the block
 	values := make([][]uint64, d.Header.NumColumns)
-	var buf [240]uint64
 
 	for i, need := range d.Need {
 		// skip columns that are not required
@@ -150,13 +151,13 @@ func (d *Decoder) DecodeBlock() ([][]uint64, error) {
 			var encoded uint64
 			encoded, words = words[0], words[1:]
 			// decode word
-			c, err := simple8b.Decode(&buf, encoded)
+			c, err := simple8b.Decode(&d.buffer, encoded)
 			if err != nil {
 				d.s = stateError
 				return nil, err
 			}
 			// copy decoded raw values to buffer
-			copy(values[i][pointsRead:], buf[:c])
+			copy(values[i][pointsRead:], d.buffer[:c])
 			// add c to pointsRead after copy
 			pointsRead += c
 		}
