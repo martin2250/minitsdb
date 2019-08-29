@@ -9,6 +9,7 @@ import (
 	"github.com/rossmcdonald/telegram_hook"
 	log "github.com/sirupsen/logrus"
 	"net/http"
+	"net/http/pprof"
 	"time"
 )
 
@@ -23,6 +24,11 @@ func main() {
 	if opts.CpuProfilePath != "" {
 		startCpuProfile(opts.CpuProfilePath)
 		defer stopCpuProfile(opts.CpuProfilePlot)
+	}
+
+	if opts.TracePath != "" {
+		startTrace(opts.TracePath)
+		defer stopTrace()
 	}
 
 	// configuration
@@ -70,6 +76,7 @@ func main() {
 			Sink: ingest.ChanPointSink(ingestPoints),
 		}
 		routerApi.Handle("/insert", httpl)
+		r.PathPrefix("/debug/").HandlerFunc(pprof.Index)
 
 		srv := &http.Server{
 			Addr:    conf.ApiListenAddress,

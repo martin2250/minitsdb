@@ -117,7 +117,7 @@ func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			h.pendingQueries[params] = cluster
 			// todo: make this configurable
-			time.AfterFunc(10*time.Millisecond, func() {
+			time.AfterFunc(25*time.Millisecond, func() {
 				h.mux.Lock()
 				delete(h.pendingQueries, cluster.Parameters)
 				h.mux.Unlock()

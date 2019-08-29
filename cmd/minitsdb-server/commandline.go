@@ -12,6 +12,8 @@ type CommandLineOptions struct {
 
 	CpuProfilePath string `long:"cpuprofile" description:"record a cpu profile to this file"`
 	CpuProfilePlot bool   `long:"plot" description:"plot the recorded cpu profile"`
+
+	TracePath string `long:"trace" description:"record a trace to this file"`
 }
 
 func readCommandLineOptions() CommandLineOptions {

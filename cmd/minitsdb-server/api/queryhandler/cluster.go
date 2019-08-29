@@ -5,8 +5,10 @@ import (
 	"github.com/martin2250/minitsdb/minitsdb"
 	"github.com/martin2250/minitsdb/minitsdb/storage"
 	. "github.com/martin2250/minitsdb/minitsdb/types"
+	"github.com/sirupsen/logrus"
 	"io"
 	"sync"
+	"time"
 )
 
 type QueryResultWriter interface {
@@ -36,6 +38,7 @@ type QueryClusterParameters struct {
 type QueryCluster struct {
 	Parameters QueryClusterParameters
 	SubQueries []*SubQuery
+	TimeStart  time.Time
 }
 
 func (c *QueryCluster) Execute() error {
@@ -53,7 +56,12 @@ func (c *QueryCluster) Execute() error {
 		for _, subQuery := range c.SubQueries {
 			subQuery.Done.Done()
 		}
+
+		d := time.Now().Sub(c.TimeStart)
+		logrus.WithFields(logrus.Fields{"duration": d}).Info("query cluster complete")
 	}()
+
+	c.TimeStart = time.Now()
 
 	for {
 		buffer, err := query.ReadNext()
