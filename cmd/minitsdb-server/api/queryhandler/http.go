@@ -113,11 +113,11 @@ func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			cluster = &QueryCluster{
 				Parameters: params,
-				SubQueries: []SubQuery{subQuery},
+				SubQueries: []*SubQuery{subQuery},
 			}
 			h.pendingQueries[params] = cluster
 			// todo: make this configurable
-			time.AfterFunc(10*time.Millisecond, func() {
+			time.AfterFunc(25*time.Millisecond, func() {
 				h.mux.Lock()
 				delete(h.pendingQueries, cluster.Parameters)
 				h.mux.Unlock()

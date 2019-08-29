@@ -71,6 +71,9 @@ type Series struct {
 	ReuseMax int
 
 	Mux sync.Mutex
+
+	PrimaryCount   int
+	SecondaryCount int
 }
 
 type AssociatedPoint struct {
@@ -212,7 +215,7 @@ Top:
 	return columns
 }
 
-func (s *Series) addColumn(conf YamlColumnConfig, indexPrimary, indexSecondary *int) error {
+func (s *Series) addColumn(conf YamlColumnConfig) error {
 	col := Column{
 		Decimals: conf.Decimals,
 	}
@@ -252,13 +255,13 @@ func (s *Series) addColumn(conf YamlColumnConfig, indexPrimary, indexSecondary *
 		dcol := col
 		dcol.Tags = map[string]string{}
 		dcol.IndexSecondary = make([]int, downsampling.AggregatorCount)
-		dcol.IndexPrimary = *indexPrimary
-		*indexPrimary++
+		dcol.IndexPrimary = s.PrimaryCount
+		s.PrimaryCount++
 
 		for i, need := range needs {
 			if need {
-				dcol.IndexSecondary[i] = *indexSecondary
-				*indexSecondary++
+				dcol.IndexSecondary[i] = s.SecondaryCount
+				s.SecondaryCount++
 			}
 		}
 
@@ -299,20 +302,18 @@ func OpenSeries(seriespath string) (Series, error) {
 		OldestValue: math.MaxInt64,
 
 		Path: seriespath,
+
+		PrimaryCount:   1,
+		SecondaryCount: 2,
 	}
 
-	// create columns
-	var (
-		indexPrimary   = 1
-		indexSecondary = 2
-	)
 	for _, colconf := range conf.Columns {
-		err = s.addColumn(colconf, &indexPrimary, &indexSecondary)
+		err = s.addColumn(colconf)
 		if err != nil {
 			return Series{}, err
 		}
 		// todo: change this arbitrary limit to something meaningful
-		if indexSecondary > 127 {
+		if s.SecondaryCount > 127 {
 			return Series{}, errors.New("column limit exceeded")
 		}
 	}
@@ -395,9 +396,9 @@ func (s *Series) checkFirstBucket() error {
 	}
 
 	// fill decoder columns
-	d.Columns = make([]int, header.NumColumns)
-	for i := range d.Columns {
-		d.Columns[i] = i
+	d.Need = make([]bool, len(s.Columns)+1)
+	for i := range d.Need {
+		d.Need[i] = true
 	}
 
 	// read values from last block
@@ -558,27 +559,31 @@ func (s *Series) Query(params Parameters, timeRange TimeRange) *Query {
 		params.TimeStep = 1
 	}
 
-	params.TimeStep = util.RoundUp(params.TimeStep, s.FirstBucket.TimeResolution)
-
-	// todo: REENABLE THIS WHEN LAST POINT SOURCES ADDED
-	//for _, bucket := range s.LastBuckets {
-	//	if bucket.TimeResolution <= params.TimeStep {
-	//		params.TimeStep = util.RoundUp(params.TimeStep, bucket.TimeResolution)
-	//	}
-	//}
-
 	// create query object
 	q := &Query{
 		Param:     params,
-		Sources:   make([]PointSource, 0, 1),
+		Sources:   make([]BucketQuerySource, 1, len(s.LastBuckets)+1),
 		TimeRange: timeRange,
 	}
 
-	// create first point source
-	// todo: add sources for other buckets
+	// adjust time step
+	q.Param.TimeStep = util.RoundUp(params.TimeStep, s.FirstBucket.TimeResolution)
 
-	fps := NewFirstPointSource(s, &q.TimeRange, params.Columns, params.TimeStep)
-	q.Sources = append(q.Sources, &fps)
+	for _, bucket := range s.LastBuckets {
+		if bucket.TimeResolution <= q.Param.TimeStep {
+			q.Param.TimeStep = util.RoundUp(q.Param.TimeStep, bucket.TimeResolution)
+		}
+	}
+
+	// add sources
+	q.Sources[0] = NewBucketQuerySource(s, &s.FirstBucket, &q.TimeRange, params.Columns, params.TimeStep, true)
+
+	for i := range s.LastBuckets {
+		if s.LastBuckets[i].TimeResolution <= q.Param.TimeStep {
+			q.Sources = append(q.Sources,
+				NewBucketQuerySource(s, &s.LastBuckets[i], &q.TimeRange, params.Columns, params.TimeStep, false))
+		}
+	}
 
 	return q
 }

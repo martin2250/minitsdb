@@ -1,5 +1,8 @@
 # miniTSDB
 
+#### Commands
+`go tool pprof -http=192.168.2.91:8088 test.pprof`
+
 ## Threading Model
 All Database related operations happen in the main program loop.
 Interaction with outside clients is handled by goroutines, communication with the main loop happens through FIFOs.

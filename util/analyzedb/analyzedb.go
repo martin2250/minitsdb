@@ -2,10 +2,9 @@ package analyzedb
 
 import (
 	"fmt"
+	"github.com/martin2250/minitsdb/minitsdb/storage/encoding"
 	"io"
 	"math"
-
-	"github.com/martin2250/minitsdb/minitsdb/storage"
 )
 
 // ErrColumnMismatch indicates that blocks in a file have inconsistent numbers of columns
@@ -24,7 +23,9 @@ type AnalyzeResult struct {
 
 // Analyze reads all blocks from a file, decodes the headers and calculates statistics
 func Analyze(r io.ReadSeeker) (result AnalyzeResult, err error) {
-	header, err := storage.DecodeHeader(r)
+	dec := encoding.NewDecoder()
+	dec.SetReader(r)
+	header, err := dec.DecodeHeader()
 
 	if err != nil {
 		if err == io.EOF {
@@ -56,7 +57,7 @@ func Analyze(r io.ReadSeeker) (result AnalyzeResult, err error) {
 			return
 		}
 
-		header, err = storage.DecodeHeader(r)
+		header, err = dec.DecodeHeader()
 
 		if err != nil {
 			if err == io.EOF {
