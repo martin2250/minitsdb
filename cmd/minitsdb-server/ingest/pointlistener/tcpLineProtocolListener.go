@@ -51,6 +51,8 @@ func (l *TCPListener) handleTCP(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
 	parser := lineprotocol.NewParser(l.db, l.sink)
 
+	scanner.Buffer(nil, 1024*16)
+
 	defer func() {
 		if r := recover(); r != nil {
 			logrus.WithFields(logrus.Fields{"panic": r, "remote": conn.RemoteAddr}).Warning("tcp line protocol panic")

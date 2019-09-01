@@ -20,8 +20,9 @@ func (b *PointBuffer) InsertIndex(time int64) int {
 	indexBuffer := 0
 	var atEnd bool // value is appended to end of buffer
 
+	length := b.Len()
 	for {
-		if indexBuffer >= b.Len() {
+		if indexBuffer >= length {
 			atEnd = true
 			break
 		}
