@@ -47,10 +47,7 @@ func (c *QueryCluster) Execute() error {
 		columns = append(columns, subQuery.Columns...)
 	}
 
-	query := c.Parameters.Series.Query(minitsdb.Parameters{
-		TimeStep: c.Parameters.TimeStep,
-		Columns:  columns,
-	}, c.Parameters.Range)
+	query := c.Parameters.Series.Query(columns, c.Parameters.Range, c.Parameters.TimeStep)
 
 	defer func() {
 		for _, subQuery := range c.SubQueries {
@@ -64,7 +61,7 @@ func (c *QueryCluster) Execute() error {
 	c.TimeStart = time.Now()
 
 	for {
-		buffer, err := query.ReadNext()
+		buffer, err := query.Next()
 
 		if err == io.EOF {
 			return nil
@@ -72,22 +69,24 @@ func (c *QueryCluster) Execute() error {
 			return err
 		}
 
-		if buffer.Cols() != len(columns) {
-			// this should never happen, maybe replace with panic or just leave out?
-			return errors.New("query returned buffer with different size")
-		}
-
 		if buffer.Len() == 0 {
 			continue
 		}
 
-		var i int
+		if buffer.Cols() != len(columns)+1 {
+			// this should never happen, maybe replace with panic or just leave out?
+			return errors.New("query returned buffer with different size")
+		}
+
+		i := 1
 		for _, subQuery := range c.SubQueries {
-			_ = subQuery.Sink.Write(storage.PointBuffer{
-				Time:   buffer.Time,
-				Values: buffer.Values[i : i+len(subQuery.Columns)],
-			})
+			values := make([][]int64, len(subQuery.Columns)+1)
+			// copy time
+			values[0] = buffer.Values[0]
+			copy(values[1:], buffer.Values[i:i+len(subQuery.Columns)])
 			i += len(subQuery.Columns)
+
+			_ = subQuery.Sink.Write(storage.PointBuffer{Values: values})
 		}
 	}
 }

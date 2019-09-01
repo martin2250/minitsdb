@@ -35,9 +35,9 @@ func (w *httpQueryResultWriter) Write(buffer storage.PointBuffer) error {
 		return err
 	}
 
-	err = binary.Write(w.Writer, binary.LittleEndian, buffer.Time)
+	err = binary.Write(w.Writer, binary.LittleEndian, buffer.Values[0])
 
-	for i, vals := range buffer.Values {
+	for i, vals := range buffer.Values[1:] {
 		fac := math.Pow10(-w.Columns[i].Column.Decimals)
 		valuesf := make([]float64, len(vals))
 		for j := range valuesf {

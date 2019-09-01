@@ -101,28 +101,6 @@ func main() {
 
 	timerFlush := time.Tick(1 * time.Second)
 
-	for i := range db.Series {
-		lastBucket := &db.Series[i].FirstBucket
-		primary := true
-		logds := log.WithFields(log.Fields{"series": &db.Series[i].Tags})
-		logds.Info("downsampling series")
-
-		for ib := range db.Series[i].LastBuckets {
-			logds.WithFields(log.Fields{"bucketid": ib, "primary": primary}).Info("downsampling bucket")
-
-			ds := minitsdb.NewDownsampler(&db.Series[i], lastBucket, &db.Series[i].LastBuckets[ib], primary)
-
-			primary = false
-			lastBucket = &db.Series[i].LastBuckets[ib]
-
-			err := ds.Run()
-			if err != nil {
-				logds.WithError(err).Error("error while downsampling")
-				break
-			}
-		}
-	}
-
 LoopMain:
 	for {
 		select {

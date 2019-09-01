@@ -3,10 +3,11 @@ package minitsdb
 import (
 	"github.com/martin2250/minitsdb/minitsdb/downsampling"
 	"github.com/martin2250/minitsdb/minitsdb/storage"
+	"github.com/martin2250/minitsdb/minitsdb/storage/encoding"
 	. "github.com/martin2250/minitsdb/minitsdb/types"
-	"github.com/sirupsen/logrus"
+	"github.com/martin2250/minitsdb/util"
 	"io"
-	"time"
+	"math"
 )
 
 // QueryColumn is the combination of a column index and aggregation
@@ -15,60 +16,203 @@ type QueryColumn struct {
 	Function downsampling.Function
 }
 
-type Parameters struct {
-	TimeStep int64
-	Columns  []QueryColumn
-}
-
-type PointSource interface {
-	Next() (storage.PointBuffer, error)
-}
-
-// Query does stuff
+// Query reads and aggregates points from a bucket of a series (both from disk and RAM)
 type Query struct {
-	Param     Parameters
-	TimeRange TimeRange
-	// todo: change this, this should not be public
-	Sources []BucketQuerySource
+	timeRange TimeRange
+	timeStep  int64
 
-	Trace struct {
-		Init      bool
-		Points    int
-		TimeStart time.Time
-	}
+	buffer           storage.PointBuffer
+	bufferIndexStart int
+	reader           storage.FileDecoder
+
+	bucket *Bucket
+
+	columns      []QueryColumn
+	needIndex    []int
+	transformers []encoding.Transformer
+
+	// SkipBlocks has been called yet
+	primed bool
+	atEnd  bool
 }
 
-func (q *Query) ReadNext() (storage.PointBuffer, error) {
-	if !q.Trace.Init {
-		q.Trace.TimeStart = time.Now()
-		q.Trace.Init = true
+// read header and find first block that contains points within query range
+// do this before calling next for the first time to improve latency
+func (q *Query) SkipBlocks() error {
+	header := encoding.BlockHeader{
+		TimeLast: math.MinInt64,
 	}
 
-	for {
-		if len(q.Sources) == 0 {
-			return storage.PointBuffer{}, io.EOF
+	for header.TimeLast < q.timeRange.Start {
+		var err error
+		header, err = q.reader.DecodeHeader()
+
+		if err != nil {
+			return err
 		}
 
-		i := len(q.Sources) - 1
+		// todo: do proper range check, use TimeRange in BlockHeader
+		if header.TimeFirst > q.timeRange.End {
+			err = io.EOF
+		}
+	}
 
-		buffer, err := q.Sources[i].Next()
+	return nil
+}
 
-		if err == nil {
-			q.Trace.Points += buffer.Len()
-			return buffer, nil
-		} else {
-			if err != io.EOF {
-				return storage.PointBuffer{}, err
+func (q *Query) readIntoBuffer() error {
+	decoded, err := q.reader.DecodeBlock()
+	if err != nil {
+		return err
+	}
+
+	// transform values
+	transformed := make([][]int64, len(q.transformers))
+	for _, i := range q.needIndex {
+		transformed[i], err = q.transformers[i].Revert(decoded[i])
+		if err != nil {
+			return err
+		}
+	}
+
+	// find indices of first and last relevant point
+	indexStart := 0
+	indexEnd := len(transformed[0])
+
+	for indexStart < indexEnd && !q.timeRange.Contains(transformed[0][indexStart]) {
+		indexStart++
+	}
+	for indexEnd > indexStart && !q.timeRange.Contains(transformed[0][indexEnd-1]) {
+		indexEnd--
+	}
+
+	if indexStart == indexEnd {
+		return nil
+	}
+
+	for _, i := range q.needIndex {
+		q.buffer.Values[i] = append(q.buffer.Values[i], transformed[i][indexStart:indexEnd]...)
+	}
+
+	return nil
+}
+
+func (q *Query) Next() (storage.PointBuffer, error) {
+	if q.atEnd {
+		return storage.PointBuffer{}, io.EOF
+	}
+
+	if q.timeRange.Start >= q.timeRange.End {
+		return storage.PointBuffer{}, io.EOF
+	}
+
+	if !q.primed {
+		err := q.SkipBlocks()
+		if err != nil {
+			return storage.PointBuffer{}, err
+		}
+		q.primed = true
+	}
+
+	err := q.readIntoBuffer()
+	if err != nil {
+		if err != io.EOF {
+			return storage.PointBuffer{}, err
+		}
+		q.atEnd = true
+		for i := range q.bucket.Buffer.Values[0] {
+			q.buffer.InsertPoint(q.bucket.Buffer.At(i))
+		}
+	}
+
+	output := DownsampleQuery(q.buffer, q.columns, q.timeStep, false, &q.bufferIndexStart, q.bucket.First)
+
+	if output.Len() > 0 {
+		q.timeRange.Start = output.Values[0][output.Len()-1] + q.timeStep
+	}
+
+	// re-use array to reduce allocations
+	if q.bufferIndexStart >= len(q.buffer.Values[0]) {
+		q.bufferIndexStart = 0
+	} else if q.bufferIndexStart > 2*cap(q.buffer.Values[0])/3 {
+		for _, i := range q.needIndex {
+			length := copy(q.buffer.Values[i], q.buffer.Values[i][q.bufferIndexStart:])
+			q.buffer.Values[i] = q.buffer.Values[i][:length]
+		}
+		q.bufferIndexStart = 0
+	}
+
+	return output, nil
+}
+
+func (b *Bucket) Query(columns []QueryColumn, timeRange TimeRange, timeStep int64) *Query {
+	// create list of relevant files
+	relevantFiles := make([]*storage.DataFile, 0, 8)
+
+	for i, file := range b.DataFiles {
+		if file.TimeEnd < timeRange.Start || file.TimeStart > timeRange.End {
+			continue
+		}
+		relevantFiles = append(relevantFiles, b.DataFiles[i])
+	}
+
+	// determine which columns need to be decoded
+	var decoderNeed = make([]bool, b.Buffer.Cols())
+	var transformers = make([]encoding.Transformer, b.Buffer.Cols())
+
+	decoderNeed[0] = true // need time
+	transformers[0] = encoding.TimeTransformer
+
+	if b.First {
+		for _, queryCol := range columns {
+			decoderNeed[queryCol.Column.IndexPrimary] = true
+			transformers[queryCol.Column.IndexPrimary] = queryCol.Column.Transformer
+		}
+	} else {
+		decoderNeed[1] = true
+		transformers[1] = encoding.CountTransformer
+
+		for _, queryCol := range columns {
+			need := make([]bool, downsampling.AggregatorCount)
+			queryCol.Function.Needs(need)
+			for i, indexSecondary := range queryCol.Column.IndexSecondary {
+				if need[i] {
+					decoderNeed[indexSecondary] = true
+					transformers[indexSecondary] = queryCol.Column.Transformer
+				}
 			}
-			q.Sources = q.Sources[:i]
-
-			logrus.WithFields(logrus.Fields{
-				"points":   q.Trace.Points,
-				"duration": time.Now().Sub(q.Trace.TimeStart),
-			}).Info("query source exhausted")
-
-			q.Trace.Points = 0
-			q.Trace.TimeStart = time.Now()
 		}
 	}
+
+	needIndex := make([]int, 0)
+	for i, need := range decoderNeed {
+		if need {
+			needIndex = append(needIndex, i)
+		}
+	}
+
+	// fix parameter times to make further roundin operations unnecessary
+	// todo: this should probably be somewhere else
+	// we only want values where roundDown(time) >= timeStart
+	timeRange.Start = util.RoundUp(timeRange.Start, timeStep)
+	// we need values after timeEnd, as roundDown(time) might still be <= timeEnd
+	// todo: is this + timeStep - 1 necessary
+	timeRange.End = util.RoundDown(timeRange.End, timeStep) + timeStep - 1
+
+	// create point source struct
+	query := Query{
+		timeRange: timeRange,
+		timeStep:  util.RoundUp(timeStep, b.TimeStep),
+
+		buffer: storage.NewPointBuffer(b.Buffer.Cols()),
+		reader: storage.NewFileDecoder(relevantFiles, decoderNeed),
+
+		columns:      columns,
+		needIndex:    needIndex,
+		transformers: transformers,
+
+		bucket: b,
+	}
+
+	return &query
 }

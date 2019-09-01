@@ -50,7 +50,7 @@ func (h handleList) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	for i, s := range matches {
 		data[i].Tags = s.Tags
-		data[i].TimeStep = s.FirstBucket.TimeResolution
+		data[i].TimeStep = s.Buckets[0].TimeStep
 		data[i].Columns = make([]handleListColumn, len(s.Columns))
 		for j, c := range s.Columns {
 			data[i].Columns[j].Tags = c.Tags

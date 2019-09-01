@@ -1,7 +1,6 @@
 package minitsdb
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"github.com/martin2250/minitsdb/minitsdb/downsampling"
@@ -11,7 +10,6 @@ import (
 	"math"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
@@ -49,14 +47,11 @@ func (c Column) Supports(f downsampling.Function) bool {
 
 // Series describes a time series, id'd by a name and tags
 type Series struct {
-	// todo: make buffer private
-	Buffer storage.PointBuffer
-
 	OverwriteLast bool // data buffer contains last block on disk, overwrite
 	Path          string
 	Columns       []Column
-	FirstBucket   storage.Bucket
-	LastBuckets   []storage.Bucket
+
+	Buckets []Bucket
 
 	Tags map[string]string
 
@@ -69,8 +64,6 @@ type Series struct {
 	ForceFlushCount int
 
 	ReuseMax int
-
-	Mux sync.Mutex
 
 	PrimaryCount   int
 	SecondaryCount int
@@ -102,8 +95,7 @@ func (s Series) ConvertPoint(p ingest.Point) (storage.Point, error) {
 
 	// holds output value
 	out := storage.Point{
-		Time:   p.Time,
-		Values: make([]int64, len(s.Columns)),
+		Values: make([]int64, len(s.Columns)+1),
 	}
 
 	// true for every column that has already been assigned a value,
@@ -128,7 +120,7 @@ func (s Series) ConvertPoint(p ingest.Point) (storage.Point, error) {
 		filled[i] = true
 
 		valf := v.Value * math.Pow10(s.Columns[i].Decimals)
-		out.Values[i] = int64(math.Round(valf))
+		out.Values[i+1] = int64(math.Round(valf))
 	}
 
 	return out, nil
@@ -142,22 +134,22 @@ func (s *Series) InsertPoint(p storage.Point) error {
 	}
 
 	// check if points time is already archived
-	if p.Time <= s.FirstBucket.TimeLast {
+	if p.Values[0] <= s.Buckets[0].LastTimeOnDisk {
 		return ErrInsertAtEnd
 	}
 
-	if p.Time < s.OldestValue {
-		s.OldestValue = p.Time
+	if p.Values[0] < s.OldestValue {
+		s.OldestValue = p.Values[0]
 	}
 
-	s.Buffer.InsertPoint(p)
+	s.Buckets[0].Insert(p)
 
 	return nil
 }
 
 // GetIndices returns the indices of all columns that match the given set of tags
 // the values of argument 'tags' are used as regex to match against all columns
-// todo: deprecate
+// todo: deprecate in favor of findcolumns
 func (s Series) GetIndices(tags map[string]string) []int {
 	indices := make([]int, 0)
 
@@ -297,9 +289,10 @@ func OpenSeries(seriespath string) (Series, error) {
 
 		ReuseMax:    conf.ReuseMax,
 		Columns:     make([]Column, 0),
-		LastBuckets: make([]storage.Bucket, len(conf.Buckets)),
 		Tags:        conf.Tags,
 		OldestValue: math.MaxInt64,
+
+		Buckets: make([]Bucket, len(conf.Buckets)),
 
 		Path: seriespath,
 
@@ -336,95 +329,32 @@ func OpenSeries(seriespath string) (Series, error) {
 	for i, bc := range conf.Buckets {
 		timeStep *= int64(bc.Factor)
 
-		s.LastBuckets[i], err = storage.OpenBucket(s.Path, timeStep, conf.PointsFile)
+		s.Buckets[i], err = OpenBucket(s.Path, timeStep, conf.PointsFile)
+
+		if i == 0 {
+			s.Buckets[i].First = true
+			s.Buckets[i].Buffer = storage.NewPointBuffer(s.PrimaryCount)
+		} else {
+			s.Buckets[i].Buffer = storage.NewPointBuffer(s.SecondaryCount)
+
+		}
+
+		if i == len(conf.Buckets)-1 {
+			s.Buckets[i].Last = true
+		} else {
+			s.Buckets[i].Next = &s.Buckets[i+1]
+		}
 
 		if err != nil {
 			return Series{}, err
 		}
 	}
 
-	// split away first bucket
-	s.FirstBucket = s.LastBuckets[0]
-	s.LastBuckets = s.LastBuckets[1:]
-
-	// create top level value array
-	s.Buffer = storage.NewPointBuffer(len(s.Columns))
-
-	// if the last block of the first bucket is not full, read it's values and set the overwrite last flag
-	err = s.checkFirstBucket()
-
 	if err != nil {
 		return Series{}, err
 	}
 
 	return s, nil
-}
-
-// checkFirstBucket checks the last block in the first bucket for free space according to ReuseMax
-// errors are to be treated as fatal
-func (s *Series) checkFirstBucket() error {
-	if len(s.FirstBucket.DataFiles) == 0 {
-		return nil
-	}
-	// read last block from file
-	dataFile := s.FirstBucket.DataFiles[len(s.FirstBucket.DataFiles)-1]
-	buf, err := dataFile.ReadBlock(dataFile.Blocks - 1)
-
-	if err != nil {
-		return err
-	}
-
-	// decode header
-	d := encoding.NewDecoder()
-	d.SetReader(&buf)
-
-	// read last block header
-	header, err := d.DecodeHeader()
-
-	if err != nil {
-		return err
-	}
-
-	// check if database file matches series
-	if header.NumColumns != (len(s.Columns) + 1) {
-		return errors.New("database file does not match series")
-	}
-
-	// check if last block can be reused
-	if header.BytesUsed > s.ReuseMax {
-		return nil
-	}
-
-	// fill decoder columns
-	d.Need = make([]bool, len(s.Columns)+1)
-	for i := range d.Need {
-		d.Need[i] = true
-	}
-
-	// read values from last block
-	values, err := d.DecodeBlock()
-
-	if err != nil {
-		return err
-	}
-
-	// decode time and values
-	s.Buffer.Time, err = encoding.TimeTransformer.Revert(values[0])
-
-	if err != nil {
-		return err
-	}
-
-	for i := range s.Columns {
-		s.Buffer.Values[i], err = s.Columns[i].Transformer.Revert(values[i+1])
-
-		if err != nil {
-			return err
-		}
-	}
-
-	s.OverwriteLast = true
-	return nil
 }
 
 // CheckFlush checks if the series is due for a regular flush
@@ -435,7 +365,7 @@ func (s *Series) CheckFlush() bool {
 	}
 
 	// flush if buffer size exceeds force flush count
-	if s.Buffer.Len() >= s.ForceFlushCount {
+	if s.Buckets[0].Buffer.Len() >= s.ForceFlushCount {
 		return true
 	}
 
@@ -445,145 +375,42 @@ func (s *Series) CheckFlush() bool {
 	}
 
 	// check if buffer size exceeds flush count
-	if s.Buffer.Len() >= s.FlushCount {
+	if s.Buckets[0].Buffer.Len() >= s.FlushCount {
 		return true
 	}
 
 	return false
 }
 
-// Discard the first n values from RAM
-// copy arrays to allow GC to work
-func (s *Series) Discard(n int) {
-	s.Buffer.Discard(n)
-
-	// todo: this decision should also be based on wether the block was marked for overwriting
-	if s.Buffer.Len() == 0 {
-		s.OldestValue = math.MaxInt64
-	} else {
-		s.OldestValue = s.Buffer.Time[0]
-	}
-}
-
-// SaveDiscard saves n values to a recovery file and then calls discard
-func (s *Series) SaveDiscard(n int) {
-	// todo: store raw values in recovery file
-	s.Discard(n)
-}
-
-// todo: make this only flush after
-// todo: a) a configurable amount of time after the last flush
-// todo: b) or a configurable maximum amount of values is in the buffer
-// Flush does not return an error, errors are handled by the function itself
 func (s *Series) Flush() {
-	if s.Buffer.Len() == 0 {
-		return
-	}
-
-	// if the oldest value is already stored on disk, just discard everything
-	if s.OldestValue == math.MaxInt64 {
-		s.Discard(s.Buffer.Len())
-		return
-	}
-
-	fmt.Printf("flushing series %v with %d points\n", s.Tags, s.Buffer.Len())
-
-	// check file boundaries
-	dataFile, count := s.FirstBucket.GetStorageTime(s.Buffer.Time)
-
-	// transform values
-	var err error
-	transformed := make([][]uint64, len(s.Columns)+1)
-
-	transformed[0], err = encoding.TimeTransformer.Apply(s.Buffer.Time[:count])
-	if err != nil {
-		fmt.Printf("ERROR while transforming time for series %v %s\n", s.Tags, err.Error())
-		s.SaveDiscard(count) // todo: log this properly
-		return
-	}
-
-	for i := range s.Columns {
-		transformed[i+1], err = s.Columns[i].Transformer.Apply(s.Buffer.Values[i][:count])
-		if err != nil {
-			fmt.Printf("ERROR while transforming values for series %v %s\n", s.Tags, err.Error())
-			s.SaveDiscard(count) // todo: log this properly
-			return
+	timeLimit := int64(math.MaxInt64)
+	for i := range s.Buckets {
+		// todo: may also force flush first bucket after flushinterval
+		for s.Buckets[i].Flush(timeLimit, false) {
 		}
+		timeLimit = s.Buckets[i].LastTimeOnDisk
 	}
-
-	// encode values
-	var block bytes.Buffer
-	header, err := encoding.EncodeBlock(&block, s.Buffer.Time[:count], transformed)
-
-	if err != nil {
-		s.SaveDiscard(count) // todo: log this properly
-		fmt.Printf("ERROR while encoding values for series %v %s\n", s.Tags, err.Error())
-		return
-	}
-
-	// write transformed values to file
-	err = dataFile.WriteBlock(block, s.OverwriteLast)
-
-	if err != nil {
-		s.SaveDiscard(header.NumPoints) // todo: log this properly
-		fmt.Printf("ERROR while encoding values for series %v %s\n", s.Tags, err.Error())
-		return
-	}
-
-	fmt.Printf("wrote %d points to file, block size %d bytes", header.NumPoints, header.BytesUsed)
-
-	// don't discard points if we can reuse the block
-	// todo: fix overwriting, right now it seems to always append to the file
-	if false && header.NumPoints == s.Buffer.Len() && header.BytesUsed < s.ReuseMax {
-		s.OverwriteLast = true
-		fmt.Println(", reusing buffer")
-	} else {
-		s.FirstBucket.TimeLast = s.Buffer.Time[count-1]
-		s.OverwriteLast = false
-		s.Discard(header.NumPoints)
-		fmt.Println(", flushing buffer")
-	}
-
-	s.LastFlush = time.Now()
 }
 
+// flush all values to disk, used to prepare for a shutdown
 func (s *Series) FlushAll() {
-	for s.Buffer.Len() > 0 {
-		s.Flush()
+	timeLimit := int64(math.MaxInt64)
+	for i := range s.Buckets {
+		for s.Buckets[i].Flush(timeLimit, i == 0) {
+		}
+		timeLimit = s.Buckets[i].LastTimeOnDisk
 	}
 }
 
-func (s *Series) Query(params Parameters, timeRange TimeRange) *Query {
-	// adjust param time step to be an integer multiple of a bucket time step
-	if params.TimeStep < 1 {
-		params.TimeStep = 1
-	}
-
-	// create query object
-	q := &Query{
-		Param:     params,
-		Sources:   make([]BucketQuerySource, 1, len(s.LastBuckets)+1),
-		TimeRange: timeRange,
-	}
-
-	// adjust time step
-	q.Param.TimeStep = util.RoundUp(params.TimeStep, s.FirstBucket.TimeResolution)
-
-	for _, bucket := range s.LastBuckets {
-		if bucket.TimeResolution <= q.Param.TimeStep {
-			q.Param.TimeStep = util.RoundUp(q.Param.TimeStep, bucket.TimeResolution)
+func (s *Series) Query(columns []QueryColumn, timeRange TimeRange, timeStep int64) *Query {
+	// find first bucket with timeStep smaller or equal to query
+	i := len(s.Buckets) - 1
+	for i > 0 {
+		if s.Buckets[i].TimeStep <= timeStep {
+			break
 		}
+		i--
 	}
 
-	// add sources
-	q.Sources[0] = NewBucketQuerySource(s, &s.FirstBucket, &q.TimeRange, params.Columns, params.TimeStep, true)
-
-	for i := range s.LastBuckets {
-		if s.LastBuckets[i].TimeResolution <= q.Param.TimeStep {
-			q.Sources = append(q.Sources,
-				NewBucketQuerySource(s, &s.LastBuckets[i], &q.TimeRange, params.Columns, params.TimeStep, false))
-		}
-	}
-
-	return q
+	return s.Buckets[i].Query(columns, timeRange, timeStep)
 }
