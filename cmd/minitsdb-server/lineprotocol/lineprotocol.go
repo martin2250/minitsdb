@@ -93,6 +93,7 @@ func (p *Parser) parseSeries(line string) error {
 			continue
 		}
 		p.series = &p.db.Series[i]
+		p.columnMap = nil
 		return nil
 	}
 

@@ -2,8 +2,8 @@ package pointlistener
 
 import (
 	"bufio"
+	"github.com/martin2250/minitsdb/cmd/minitsdb-server/lineprotocol"
 	"github.com/martin2250/minitsdb/minitsdb"
-	"github.com/martin2250/minitsdb/minitsdb/lineprotocol"
 	"github.com/sirupsen/logrus"
 	"log"
 	"net/http"

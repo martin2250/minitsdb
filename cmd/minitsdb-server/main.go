@@ -4,7 +4,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/martin2250/minitsdb/cmd/minitsdb-server/api"
 	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest/pointlistener"
-	"github.com/martin2250/minitsdb/minitsdb/lineprotocol"
+	"github.com/martin2250/minitsdb/cmd/minitsdb-server/lineprotocol"
 	"github.com/martin2250/minitsdb/minitsdb/storage"
 	"github.com/pkg/profile"
 	"github.com/rossmcdonald/telegram_hook"
