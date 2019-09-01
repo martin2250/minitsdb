@@ -107,6 +107,7 @@ func (q *Query) Next() (storage.PointBuffer, error) {
 	}
 
 	if !q.primed {
+		q.bucket.Mux.RLock()
 		err := q.SkipBlocks()
 		if err == io.EOF {
 			q.atEnd = true
@@ -229,4 +230,8 @@ func (b *Bucket) Query(columns []QueryColumn, timeRange TimeRange, timeStep int6
 	query.buffer.Need = decoderNeed
 
 	return &query
+}
+
+func (q *Query) Close() {
+	q.bucket.Mux.RUnlock()
 }

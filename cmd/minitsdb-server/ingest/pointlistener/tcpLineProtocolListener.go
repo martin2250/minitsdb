@@ -51,6 +51,8 @@ func (l *TCPListener) handleTCP(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
 	parser := lineprotocol.NewParser(l.db, l.sink)
 
+	// todo: this should not interpret the last line sent when the connection is closed
+	// instead only interpret lines that actually end with \n
 	scanner.Buffer(nil, 1024*16)
 
 	defer func() {

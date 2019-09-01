@@ -57,6 +57,9 @@ type Bucket struct {
 // assumes that this time is not already stored on disk
 // both assumptions must be checked by the series that holds the buckets when inserting into the first bucket
 func (b *Bucket) Insert(p storage.Point) {
+	b.Mux.Lock()
+	defer b.Mux.Unlock()
+
 	b.Buffer.InsertPoint(p)
 
 	if !b.Last {
@@ -67,6 +70,9 @@ func (b *Bucket) Insert(p storage.Point) {
 // Downsample updates values buffered in the next bucket when a source value has changed in this buffer
 // returns true if any points were actually downsampled
 func (b *Bucket) Downsample() bool {
+	b.Mux.Lock()
+	defer b.Mux.Unlock()
+
 	if b.Last {
 		return false
 	}
@@ -103,6 +109,7 @@ func (b *Bucket) DownsampleStartup() error {
 		Start: b.Next.LastTimeOnDisk + b.Next.TimeStep,
 		End:   math.MaxInt64 - b.Next.TimeStep*100,
 	}, b.Next.TimeStep)
+	defer query.Close()
 
 	for {
 		buffer, err := query.Next()
@@ -128,6 +135,10 @@ func (b *Bucket) DownsampleStartup() error {
 // returns true if points were actually written to disk
 func (b *Bucket) Flush(timeLimit int64, force bool) bool {
 	b.Downsample()
+
+	b.Mux.Lock()
+	defer b.Mux.Unlock()
+
 	// not all values may be allowed to be written to disk
 	indexEnd := -1
 	if timeLimit != math.MaxInt64 {
@@ -141,8 +152,6 @@ func (b *Bucket) Flush(timeLimit int64, force bool) bool {
 	if indexEnd == 0 {
 		return false
 	}
-
-	fmt.Printf("flushing buffer %s with %d points\n", b.Path, b.Buffer.Len())
 
 	// check file boundaries
 	dataFile, created, count := b.GetStorageTime(b.Buffer.Values[0][:indexEnd])
@@ -187,8 +196,6 @@ func (b *Bucket) Flush(timeLimit int64, force bool) bool {
 		b.DataFiles = append(b.DataFiles, dataFile)
 		b.sortFiles()
 	}
-
-	fmt.Printf("wrote %d points to file, block size %d bytes", header.NumPoints, header.BytesUsed)
 
 	b.LastTimeOnDisk = b.Buffer.Values[0][count-1]
 	b.Buffer.Discard(header.NumPoints)
