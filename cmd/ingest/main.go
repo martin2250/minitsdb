@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"github.com/martin2250/minitsdb/minitsdb/lineprotocol"
 	"io"
 	"log"
 	"net"
@@ -33,14 +34,14 @@ type IngestBufferRPC struct {
 }
 
 // PopPoint deletes the oldest point in the buffer and stores it in *reply
-func (b *IngestBufferRPC) PopPoint(arg int, reply *ingest.Point) error {
+func (b *IngestBufferRPC) PopPoint(arg int, reply *lineprotocol.Point) error {
 	pointi := b.buffer.Points.Next()
 
 	if pointi == nil {
 		return io.EOF
 	}
 
-	point, ok := pointi.(*ingest.Point)
+	point, ok := pointi.(*lineprotocol.Point)
 
 	if !ok {
 		return io.EOF

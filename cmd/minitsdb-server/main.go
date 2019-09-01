@@ -3,9 +3,9 @@ package main
 import (
 	"github.com/gorilla/mux"
 	"github.com/martin2250/minitsdb/cmd/minitsdb-server/api"
-	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
 	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest/pointlistener"
-	"github.com/martin2250/minitsdb/minitsdb"
+	"github.com/martin2250/minitsdb/minitsdb/lineprotocol"
+	"github.com/martin2250/minitsdb/minitsdb/storage"
 	"github.com/pkg/profile"
 	"github.com/rossmcdonald/telegram_hook"
 	log "github.com/sirupsen/logrus"
@@ -20,7 +20,7 @@ func main() {
 	// command line
 	opts := readCommandLineOptions()
 
-	opts.Profile = "block"
+	opts.Profile = "cpu"
 	opts.ProfilePath = "/tmp"
 
 	// profiling
@@ -81,11 +81,7 @@ func main() {
 	db := loadDatabase(opts.DatabasePath)
 
 	// ingestion
-	ingestPoints := make(chan ingest.Point, conf.IngestBufferCapacity)
-	associatedPoints := make(chan minitsdb.AssociatedPoint, conf.IngestBufferCapacity)
-	for i := uint(0); i < conf.IngestionWorkerCount; i++ {
-		go associatePoints(ingestPoints, associatedPoints, &db)
-	}
+	ingestPoints := make(chan lineprotocol.Point, conf.IngestBufferCapacity)
 
 	// http
 	if conf.ApiPath != "" {
@@ -94,9 +90,7 @@ func main() {
 		routerApi := r.PathPrefix(conf.ApiPath).Subrouter()
 		api.Register(&db, routerApi)
 
-		httpl := pointlistener.HTTPLineProtocolHandler{
-			Sink: ingest.ChanPointSink(ingestPoints),
-		}
+		httpl := pointlistener.NewHTTPHandler(&db, ingestPoints)
 		routerApi.Handle("/insert", httpl)
 
 		srv := &http.Server{
@@ -113,10 +107,7 @@ func main() {
 
 	// tcp
 	if conf.TcpListenAddress != "" {
-		tcpl := pointlistener.TCPLineProtocolListener{
-			Sink:    ingest.ChanPointSink(ingestPoints),
-			Address: conf.TcpListenAddress,
-		}
+		tcpl := pointlistener.NewTCPListener(&db, ingestPoints, conf.TcpListenAddress)
 		go shutdownOnError(tcpl.Listen, shutdown, conf.ShutdownTimeout, "TCP listener failed")
 	}
 
@@ -136,8 +127,8 @@ LoopMain:
 					}
 				}
 			}
-		case p := <-associatedPoints:
-			err := p.Series.InsertPoint(p.Point)
+		case p := <-ingestPoints:
+			err := p.Series.InsertPoint(storage.Point{Values: p.Values})
 			if err != nil {
 				log.WithError(err).Warning("Insert Failed")
 				continue

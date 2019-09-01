@@ -2,6 +2,7 @@ package pointsource
 
 import (
 	ingest2 "github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
+	"github.com/martin2250/minitsdb/minitsdb/lineprotocol"
 	"math/rand"
 	"time"
 )
@@ -13,12 +14,12 @@ type RandomPointSource struct {
 }
 
 // GetPoint returns a random point as described by the options
-func (rs RandomPointSource) GetPoint() (ingest2.Point, bool) {
+func (rs RandomPointSource) GetPoint() (lineprotocol.Point, bool) {
 	if rand.Int31n(5) == 0 {
-		return ingest2.Point{}, false
+		return lineprotocol.Point{}, false
 	}
 
-	p := ingest2.Point{
+	p := lineprotocol.Point{
 		Tags:   rs.Tags,
 		Values: make([]ingest2.Value, len(rs.ValueTags)),
 		Time:   time.Now().Unix(),

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
 	"github.com/martin2250/minitsdb/util"
 )
 
@@ -69,11 +68,6 @@ type Series struct {
 	SecondaryCount int
 }
 
-type AssociatedPoint struct {
-	Point  storage.Point
-	Series *Series
-}
-
 // ErrColumnMismatch indicates that the insert failed because point values could not be assigned to series columns unambiguously
 var ErrColumnMismatch = errors.New("point values could not be assigned to series columns unambiguously")
 
@@ -85,48 +79,6 @@ var ErrColumnAmbiguous = errors.New("point values matches two columns")
 
 // ErrUnknownColumn indicates that the insert failed because one of the values could not be assigned to a column
 var ErrUnknownColumn = errors.New("value doesn't match any columns")
-
-// ConvertPoint converts a point from the ingest format (values and maps of tags) to the series format (list of values in fixed order)
-func (s Series) ConvertPoint(p ingest.Point) (storage.Point, error) {
-	// number of values must match
-	if len(p.Values) != len(s.Columns) {
-		return storage.Point{}, ErrColumnMismatch
-	}
-
-	// holds output value
-	out := storage.Point{
-		Values: make([]int64, len(s.Columns)+1),
-	}
-
-	// true for every column that has already been assigned a value,
-	// used to check if two values from p match the same column
-	filled := make([]bool, len(s.Columns))
-
-	for _, v := range p.Values {
-		indices := s.GetIndices(v.Tags)
-
-		if len(indices) == 0 {
-			return storage.Point{}, ErrUnknownColumn
-		} else if len(indices) != 1 {
-			return storage.Point{}, ErrColumnAmbiguous
-		}
-
-		i := indices[0]
-
-		if filled[i] {
-			return storage.Point{}, ErrColumnMismatch
-		}
-
-		filled[i] = true
-
-		valf := v.Value * math.Pow10(s.Columns[i].Decimals)
-		out.Values[i+1] = int64(math.Round(valf))
-	}
-
-	out.Values[0] = p.Time
-
-	return out, nil
-}
 
 // InsertPoint tries to insert a point into the Series, returns nil if successful
 func (s *Series) InsertPoint(p storage.Point) error {

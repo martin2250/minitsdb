@@ -1,45 +1,53 @@
 package pointlistener
 
 import (
-	ingest2 "github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
-	"io/ioutil"
+	"bufio"
+	"github.com/martin2250/minitsdb/minitsdb"
+	"github.com/martin2250/minitsdb/minitsdb/lineprotocol"
+	"github.com/sirupsen/logrus"
 	"log"
 	"net/http"
-	"strings"
 )
 
-// HTTPLineProtocolHandler handles http POST requests and stores incoming points to a point sink
-type HTTPLineProtocolHandler struct {
-	Sink ingest2.PointSink
+// HTTPHandler handles http POST requests and stores incoming points to a point sink
+type HTTPHandler struct {
+	sink chan<- lineprotocol.Point
+	db   *minitsdb.Database
+}
+
+func NewHTTPHandler(db *minitsdb.Database, sink chan<- lineprotocol.Point) HTTPHandler {
+	return HTTPHandler{
+		sink: sink,
+		db:   db,
+	}
 }
 
 // ServeHTTP processes a POST request with line protocol data
-func (h HTTPLineProtocolHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+func (h HTTPHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != "POST" {
 		log.Printf("invalid method: %s\n", request.Method)
 		return
 	}
 
-	data, err := ioutil.ReadAll(request.Body)
+	scanner := bufio.NewScanner(request.Body)
+	parser := lineprotocol.NewParser(h.db, h.sink)
 
-	if err != nil {
-		log.Printf("http read err: %v\n", err)
-		return
-	}
+	defer func() {
+		if r := recover(); r != nil {
+			logrus.WithFields(logrus.Fields{"panic": r, "remote": request.RemoteAddr}).Warning("http line protocol panic")
+		}
+	}()
 
-	text := string(data)
-
-	lines := strings.Split(text, "\n")
-
-	for _, line := range lines {
-		point, err := ingest2.ParsePoint(line)
+	for scanner.Scan() {
+		err := parser.ParseLine(scanner.Text())
 
 		if err != nil {
-			log.Printf("point err: %v\n", err)
-			return
+			logrus.WithFields(logrus.Fields{"error": err, "remote": request.RemoteAddr}).Warning("http line protocol error")
 		}
+	}
 
-		h.Sink.AddPoint(point)
+	if err := scanner.Err(); err != nil {
+		logrus.WithFields(logrus.Fields{"error": err, "remote": request.RemoteAddr}).Warning("http line protocol error")
 	}
 
 	writer.WriteHeader(204)

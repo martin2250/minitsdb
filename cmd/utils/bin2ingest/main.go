@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"github.com/martin2250/minitsdb/minitsdb/lineprotocol"
 	"io"
 	"io/ioutil"
 	"log"
@@ -63,7 +64,7 @@ func (buffer *BinBuffer) nextFile() error {
 }
 
 // PopPoint is called via RPC by the main minitsdb binary
-func (buffer *BinBuffer) PopPoint(arg int, reply *ingest.Point) error {
+func (buffer *BinBuffer) PopPoint(arg int, reply *lineprotocol.Point) error {
 
 	if buffer.currentFile == nil {
 		return io.EOF
