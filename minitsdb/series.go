@@ -182,7 +182,8 @@ func (s *Series) addColumn(conf YamlColumnConfig) error {
 
 	if len(conf.Aggregations) == 0 {
 		// default to storing the mean
-		needs[downsampling.Mean.GetIndex()] = true
+		downsampling.Mean.Needs(needs)
+		col.DefaultFunction = downsampling.Mean
 	} else {
 		for _, as := range conf.Aggregations {
 			a, ok := downsampling.Aggregators[as]
@@ -191,6 +192,7 @@ func (s *Series) addColumn(conf YamlColumnConfig) error {
 			}
 			a.Needs(needs)
 		}
+		col.DefaultFunction = downsampling.Aggregators[conf.Aggregations[0]]
 	}
 
 	if conf.Duplicate == nil {
