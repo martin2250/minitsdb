@@ -134,6 +134,9 @@ func (q *Query) Next() (storage.PointBuffer, error) {
 	// re-use array to reduce allocations
 	if q.bufferIndexStart >= len(q.buffer.Values[0]) {
 		q.bufferIndexStart = 0
+		for _, i := range q.needIndex {
+			q.buffer.Values[i] = q.buffer.Values[i][:0]
+		}
 	} else if q.bufferIndexStart > 2*cap(q.buffer.Values[0])/3 {
 		for _, i := range q.needIndex {
 			length := copy(q.buffer.Values[i], q.buffer.Values[i][q.bufferIndexStart:])

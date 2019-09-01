@@ -47,6 +47,7 @@ func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	querySinkTemplate := httpQueryResultWriter{
 		Writer: w,
 		Mux:    &sync.Mutex{},
+		binary: desc.Text == false,
 	}
 
 	// todo: test how this affects CPU load and amount of transmitted data

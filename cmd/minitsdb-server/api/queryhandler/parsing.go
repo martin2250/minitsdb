@@ -19,6 +19,7 @@ type queryDescription struct {
 	TimeStart int64
 	TimeEnd   int64
 	Wait      bool
+	Text      bool
 }
 
 func parseQuery(r io.Reader) (queryDescription, error) {
@@ -51,7 +52,7 @@ func parseQuery(r io.Reader) (queryDescription, error) {
 	}
 
 	if desc.timeStep < 1*time.Second {
-		return queryDescription{}, errors.New("time step smaller than 1s")
+		desc.timeStep = 1 * time.Second
 	}
 
 	if desc.TimeEnd <= desc.TimeStart {

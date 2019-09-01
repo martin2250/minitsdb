@@ -7,6 +7,7 @@ import (
 	"github.com/martin2250/minitsdb/minitsdb/storage"
 	"io"
 	"math"
+	"strconv"
 	"sync"
 )
 
@@ -15,9 +16,19 @@ type httpQueryResultWriter struct {
 	Mux     *sync.Mutex
 	Index   int // the index of this subquery in the http response
 	Columns []minitsdb.QueryColumn
+
+	binary bool //todo: replace with enum
 }
 
 func (w *httpQueryResultWriter) Write(buffer storage.PointBuffer) error {
+	if w.binary {
+		return w.WriteBinary(buffer)
+	} else {
+		return w.WriteText(buffer)
+	}
+}
+
+func (w *httpQueryResultWriter) WriteText(buffer storage.PointBuffer) error {
 	w.Mux.Lock()
 	defer w.Mux.Unlock()
 
@@ -28,7 +39,41 @@ func (w *httpQueryResultWriter) Write(buffer storage.PointBuffer) error {
 	}{
 		SeriesIndex: w.Index,
 		NumPoints:   buffer.Len(),
-		NumValues:   buffer.Cols(),
+		NumValues:   buffer.Cols() - 1,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	for i := range buffer.Values[0] {
+		line := make([]byte, 0, 100)
+		for j := range buffer.Values {
+			line = strconv.AppendInt(line, buffer.Values[j][i], 10)
+			line = append(line, ' ')
+		}
+		line[len(line)-1] = '\n'
+		_, err = w.Writer.Write(line)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (w *httpQueryResultWriter) WriteBinary(buffer storage.PointBuffer) error {
+	w.Mux.Lock()
+	defer w.Mux.Unlock()
+
+	err := json.NewEncoder(w.Writer).Encode(struct {
+		SeriesIndex int
+		NumValues   int
+		NumPoints   int
+	}{
+		SeriesIndex: w.Index,
+		NumPoints:   buffer.Len(),
+		NumValues:   buffer.Cols() - 1,
 	})
 
 	if err != nil {
