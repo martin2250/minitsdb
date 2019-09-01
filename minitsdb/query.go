@@ -108,20 +108,29 @@ func (q *Query) Next() (storage.PointBuffer, error) {
 
 	if !q.primed {
 		err := q.SkipBlocks()
-		if err != nil {
+		if err == io.EOF {
+			q.atEnd = true
+		} else if err != nil {
 			return storage.PointBuffer{}, err
 		}
 		q.primed = true
 	}
 
-	err := q.readIntoBuffer()
-	if err != nil {
-		if err != io.EOF {
-			return storage.PointBuffer{}, err
+	if !q.atEnd {
+		err := q.readIntoBuffer()
+		if err != nil {
+			if err != io.EOF {
+				return storage.PointBuffer{}, err
+			}
+			q.atEnd = true
 		}
-		q.atEnd = true
+	}
+
+	if q.atEnd {
 		for i := range q.bucket.Buffer.Values[0] {
-			q.buffer.InsertPoint(q.bucket.Buffer.At(i))
+			if q.timeRange.Contains(q.bucket.Buffer.Values[0][i]) {
+				q.buffer.InsertPoint(q.bucket.Buffer.At(i))
+			}
 		}
 	}
 
@@ -216,6 +225,8 @@ func (b *Bucket) Query(columns []QueryColumn, timeRange TimeRange, timeStep int6
 
 		bucket: b,
 	}
+
+	query.buffer.Need = decoderNeed
 
 	return &query
 }

@@ -6,10 +6,10 @@ import (
 	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
 	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest/pointlistener"
 	"github.com/martin2250/minitsdb/minitsdb"
+	"github.com/pkg/profile"
 	"github.com/rossmcdonald/telegram_hook"
 	log "github.com/sirupsen/logrus"
 	"net/http"
-	"net/http/pprof"
 	"time"
 )
 
@@ -20,15 +20,37 @@ func main() {
 	// command line
 	opts := readCommandLineOptions()
 
-	// profiling
-	if opts.CpuProfilePath != "" {
-		startCpuProfile(opts.CpuProfilePath)
-		defer stopCpuProfile(opts.CpuProfilePlot)
-	}
+	opts.Profile = "block"
+	opts.ProfilePath = "/tmp"
 
-	if opts.TracePath != "" {
-		startTrace(opts.TracePath)
-		defer stopTrace()
+	// profiling
+	if opts.Profile != "" {
+		var p func(p *profile.Profile)
+		switch opts.Profile {
+		case "cpu":
+			p = profile.CPUProfile
+		case "mem":
+			p = profile.MemProfile
+		case "mutex":
+			p = profile.MutexProfile
+		case "block":
+			p = profile.BlockProfile
+		case "thread":
+			p = profile.ThreadcreationProfile
+		case "trace":
+			p = profile.TraceProfile
+		default:
+			log.WithField("profile", opts.Profile).Fatal("Unknown profile type")
+		}
+
+		popts := []func(p *profile.Profile){p, profile.NoShutdownHook}
+
+		if opts.ProfilePath != "" {
+			popts = append(popts, profile.ProfilePath(opts.ProfilePath))
+			popts = append(popts, profile.Quiet)
+		}
+
+		defer profile.Start(popts...).Stop()
 	}
 
 	// configuration
@@ -76,7 +98,6 @@ func main() {
 			Sink: ingest.ChanPointSink(ingestPoints),
 		}
 		routerApi.Handle("/insert", httpl)
-		r.PathPrefix("/debug/").HandlerFunc(pprof.Index)
 
 		srv := &http.Server{
 			Addr:    conf.ApiListenAddress,
@@ -100,12 +121,21 @@ func main() {
 	}
 
 	timerFlush := time.Tick(1 * time.Second)
+	timerDownsample := time.Tick(1 * time.Second)
 
 LoopMain:
 	for {
 		select {
 		case <-timerFlush:
 			db.FlushSeries()
+		case <-timerDownsample:
+			for is := range db.Series {
+				for ib := range db.Series[is].Buckets {
+					if !db.Series[is].Buckets[ib].Downsample() {
+						break
+					}
+				}
+			}
 		case p := <-associatedPoints:
 			err := p.Series.InsertPoint(p.Point)
 			if err != nil {

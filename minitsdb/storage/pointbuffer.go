@@ -6,6 +6,7 @@ import (
 
 type PointBuffer struct {
 	Values [][]int64
+	Need   []bool
 }
 
 type Point struct {
@@ -35,7 +36,10 @@ func (b *PointBuffer) InsertIndex(time int64) int {
 
 	// in both cases the buffer needs to grow
 	for i := range b.Values {
-		b.Values[i] = append(b.Values[i], 0)
+		// not all columns must be used
+		if b.Need == nil || b.Need[i] {
+			b.Values[i] = append(b.Values[i], 0)
+		}
 	}
 
 	if atEnd {
@@ -64,7 +68,9 @@ func (b *PointBuffer) InsertPoint(point Point) {
 	indexBuffer := b.InsertIndex(point.Values[0])
 
 	for i, val := range point.Values {
-		b.Values[i][indexBuffer] = val
+		if b.Need == nil || b.Need[i] {
+			b.Values[i][indexBuffer] = val
+		}
 	}
 }
 

@@ -1,12 +1,10 @@
 package queryhandler
 
 import (
-	"compress/gzip"
 	"encoding/json"
 	. "github.com/martin2250/minitsdb/minitsdb/types"
 	log "github.com/sirupsen/logrus"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -50,13 +48,13 @@ func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		binary: desc.Text == false,
 	}
 
-	// todo: test how this affects CPU load and amount of transmitted data
-	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-		w.Header().Set("Content-Encoding", "gzip")
-		gz := gzip.NewWriter(w)
-		defer gz.Close()
-		querySinkTemplate.Writer = gz
-	}
+	//// todo: test how this affects CPU load and amount of transmitted data
+	//if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+	//	w.Header().Set("Content-Encoding", "gzip")
+	//	gz := gzip.NewWriter(w)
+	//	defer gz.Close()
+	//	querySinkTemplate.Writer = gz
+	//}
 
 	h.log.WithFields(log.Fields{
 		"remote":  r.RemoteAddr,

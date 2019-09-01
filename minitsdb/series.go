@@ -123,13 +123,15 @@ func (s Series) ConvertPoint(p ingest.Point) (storage.Point, error) {
 		out.Values[i+1] = int64(math.Round(valf))
 	}
 
+	out.Values[0] = p.Time
+
 	return out, nil
 }
 
 // InsertPoint tries to insert a point into the Series, returns nil if successful
 func (s *Series) InsertPoint(p storage.Point) error {
 	// check if number of values matches columns
-	if len(p.Values) != len(s.Columns) {
+	if len(p.Values) != len(s.Columns)+1 {
 		return ErrColumnMismatch
 	}
 
@@ -323,6 +325,30 @@ func OpenSeries(seriespath string) (Series, error) {
 		}
 	}
 
+	downsampleColumns := make([]QueryColumn, s.SecondaryCount-1)
+	downsampleColumns[0] = QueryColumn{
+		Column:   &s.Columns[0],
+		Function: downsampling.Count,
+	}
+	transformersPrimary := make([]encoding.Transformer, 1, s.PrimaryCount)
+	transformersPrimary[0] = encoding.TimeTransformer
+	transformersSecondary := make([]encoding.Transformer, 2, s.SecondaryCount)
+	transformersSecondary[0] = encoding.TimeTransformer
+	transformersSecondary[1] = encoding.CountTransformer
+
+	for indexColumn, c := range s.Columns {
+		for indexAggregator, indexSecondary := range c.IndexSecondary {
+			if indexSecondary > 1 {
+				downsampleColumns[indexSecondary-1] = QueryColumn{
+					Column:   &s.Columns[indexColumn],
+					Function: downsampling.AggregatorList[indexAggregator],
+				}
+				transformersSecondary = append(transformersSecondary, c.Transformer)
+			}
+		}
+		transformersPrimary = append(transformersPrimary, c.Transformer)
+	}
+
 	// create buckets
 	timeStep := int64(1)
 
@@ -331,12 +357,18 @@ func OpenSeries(seriespath string) (Series, error) {
 
 		s.Buckets[i], err = OpenBucket(s.Path, timeStep, conf.PointsFile)
 
+		if err != nil {
+			return Series{}, err
+		}
+
+		s.Buckets[i].DownSampleColumns = downsampleColumns
 		if i == 0 {
 			s.Buckets[i].First = true
 			s.Buckets[i].Buffer = storage.NewPointBuffer(s.PrimaryCount)
+			s.Buckets[i].Transformers = transformersPrimary
 		} else {
 			s.Buckets[i].Buffer = storage.NewPointBuffer(s.SecondaryCount)
-
+			s.Buckets[i].Transformers = transformersSecondary
 		}
 
 		if i == len(conf.Buckets)-1 {
@@ -344,14 +376,12 @@ func OpenSeries(seriespath string) (Series, error) {
 		} else {
 			s.Buckets[i].Next = &s.Buckets[i+1]
 		}
-
-		if err != nil {
-			return Series{}, err
-		}
 	}
 
-	if err != nil {
-		return Series{}, err
+	for i := range s.Buckets {
+		if err := s.Buckets[i].DownsampleStartup(); err != nil {
+			return Series{}, err
+		}
 	}
 
 	return s, nil

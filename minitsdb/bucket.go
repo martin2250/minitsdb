@@ -7,6 +7,8 @@ import (
 	"github.com/martin2250/minitsdb/minitsdb/storage/encoding"
 	"github.com/martin2250/minitsdb/minitsdb/types"
 	"github.com/martin2250/minitsdb/util"
+	"github.com/sirupsen/logrus"
+	"io"
 	"io/ioutil"
 
 	"math"
@@ -88,11 +90,44 @@ func (b *Bucket) Downsample() bool {
 	return true
 }
 
+func (b *Bucket) DownsampleStartup() error {
+	if b.Next == nil {
+		return nil
+	}
+
+	defer func() {
+		logrus.Info("finished startup downsampling")
+	}()
+
+	query := b.Query(b.DownSampleColumns, types.TimeRange{
+		Start: b.Next.LastTimeOnDisk + b.Next.TimeStep,
+		End:   math.MaxInt64 - b.Next.TimeStep*100,
+	}, b.Next.TimeStep)
+
+	for {
+		buffer, err := query.Next()
+
+		if err == io.EOF {
+			return nil
+		} else if err != nil {
+			return err
+		}
+
+		b.Next.Buffer.AppendBuffer(buffer)
+
+		// todo: don't hardcode this
+		if b.Next.Buffer.Len() > 400 {
+			b.Next.Flush(b.LastTimeOnDisk, false)
+		}
+	}
+}
+
 // Flush writes the bucket's buffer content to disk
 // timeLimt sets the last time that may be written to disk
 // force allows the buffer to flush even if it would not fill an entire 4k block
 // returns true if points were actually written to disk
 func (b *Bucket) Flush(timeLimit int64, force bool) bool {
+	b.Downsample()
 	// not all values may be allowed to be written to disk
 	indexEnd := -1
 	if timeLimit != math.MaxInt64 {
@@ -110,7 +145,12 @@ func (b *Bucket) Flush(timeLimit int64, force bool) bool {
 	fmt.Printf("flushing buffer %s with %d points\n", b.Path, b.Buffer.Len())
 
 	// check file boundaries
-	dataFile, count := b.GetStorageTime(b.Buffer.Values[0][:indexEnd])
+	dataFile, created, count := b.GetStorageTime(b.Buffer.Values[0][:indexEnd])
+
+	// hit file boundary, force flush
+	if indexEnd != count {
+		force = true
+	}
 
 	// transform values
 	transformed := make([][]uint64, b.Buffer.Cols())
@@ -132,7 +172,7 @@ func (b *Bucket) Flush(timeLimit int64, force bool) bool {
 	}
 
 	// only write to disk if forced or the block can't fit any more values
-	if !force && header.NumPoints != count {
+	if !force && header.NumPoints == count {
 		return false
 	}
 
@@ -141,6 +181,11 @@ func (b *Bucket) Flush(timeLimit int64, force bool) bool {
 
 	if err != nil {
 		panic(err) // todo: make non-fatal
+	}
+
+	if created {
+		b.DataFiles = append(b.DataFiles, dataFile)
+		b.sortFiles()
 	}
 
 	fmt.Printf("wrote %d points to file, block size %d bytes", header.NumPoints, header.BytesUsed)
@@ -228,6 +273,7 @@ func OpenBucket(basePath string, timeStep int64, pointsPerFile int64) (Bucket, e
 		TimeStep:       timeStep,
 		PointsPerFile:  pointsPerFile,
 		Path:           path.Join(basePath, strconv.FormatInt(timeStep, 10)),
+		Dirty:          map[int64]struct{}{},
 	}
 
 	err := b.loadFiles()
@@ -245,39 +291,49 @@ func OpenBucket(basePath string, timeStep int64, pointsPerFile int64) (Bucket, e
 	return b, nil
 }
 
-func (b *Bucket) createDataFile(fileTime int64) *storage.DataFile {
+func (b *Bucket) getDataFile(fileTime int64) (file *storage.DataFile, created bool) {
 	fileTime = util.RoundDown(fileTime, b.TimeStep*b.PointsPerFile)
 
 	for j := range b.DataFiles {
 		if b.DataFiles[j].TimeStart == fileTime {
-			return b.DataFiles[j]
+			return b.DataFiles[j], false
 		}
 	}
-	b.DataFiles = append(b.DataFiles, storage.NewDataFile(b.Path, fileTime, b.TimeStep*b.PointsPerFile))
 
-	b.sortFiles()
+	df := storage.NewDataFile(b.Path, fileTime, b.TimeStep*b.PointsPerFile)
 
-	return b.DataFiles[len(b.DataFiles)-1]
+	return df, true
 }
 
 // GetStorageTime checks how many points fit into the same file as the first point
 // returns the number of points that fit and the time at which the file starts
-func (b *Bucket) GetStorageTime(time []int64) (*storage.DataFile, int) {
+func (b *Bucket) GetStorageTime(time []int64) (file *storage.DataFile, created bool, count int) {
 	// find data file
-	dataFile := b.createDataFile(time[0])
+	dataFile, created := b.getDataFile(time[0])
 
 	// find all points that fit into this file
 	for i, t := range time {
 		if t > dataFile.TimeEnd {
-			return dataFile, i
+			return dataFile, created, i
 		}
 	}
 
-	return dataFile, len(time)
+	return dataFile, created, len(time)
 }
 
 func (b *Bucket) WriteBlock(fileTime int64, buffer bytes.Buffer, overwrite bool) error {
-	dataFile := b.createDataFile(fileTime)
+	dataFile, created := b.getDataFile(fileTime)
 
-	return dataFile.WriteBlock(buffer, overwrite)
+	err := dataFile.WriteBlock(buffer, overwrite)
+
+	if err != nil {
+		return err
+	}
+
+	if created {
+		b.DataFiles = append(b.DataFiles, dataFile)
+		b.sortFiles()
+	}
+
+	return nil
 }

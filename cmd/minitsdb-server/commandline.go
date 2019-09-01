@@ -10,8 +10,8 @@ type CommandLineOptions struct {
 	DatabasePath string `short:"d" long:"database" description:"database path"`
 	ConfigPath   string `short:"c" long:"config" description:"configuration file"`
 
-	CpuProfilePath string `long:"cpuprofile" description:"record a cpu profile to this file"`
-	CpuProfilePlot bool   `long:"plot" description:"plot the recorded cpu profile"`
+	Profile     string `long:"profile" description:"the type of profile to record"`
+	ProfilePath string `long:"profilepath" description:"path for the profile"`
 
 	TracePath string `long:"trace" description:"record a trace to this file"`
 }
