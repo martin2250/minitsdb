@@ -17,8 +17,14 @@ func (b *IngestBuffer) ServeHTTPGet(writer http.ResponseWriter, request *http.Re
 		if len(b.Buffer[i].Values) > 0 {
 			w.WriteString(b.Buffer[i].Series + "\n")
 			w.WriteString(b.Buffer[i].Columns + "\n")
-			for v := range b.Buffer[i].Values {
-				w.WriteString(v + "\n")
+		loop:
+			for {
+				select {
+				case v := <-b.Buffer[i].Values:
+					w.WriteString(v + "\n")
+				default:
+					break loop
+				}
 			}
 		}
 		b.Buffer[i].Mux.Unlock()
