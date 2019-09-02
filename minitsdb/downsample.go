@@ -92,7 +92,7 @@ func DownsampleQuery(src storage.PointBuffer, queryColumns []QueryColumn, timeSt
 				val = qc.Function.AggregatePrimary(src.Values[qc.Column.IndexPrimary][*indexStart:indexEnd], src.Values[0][*indexStart:indexEnd])
 			} else {
 				for i, index := range qc.Column.IndexSecondary {
-					if index > 1 {
+					if index > 1 && src.Need[index] {
 						srcColSecondary[i] = src.Values[index][*indexStart:indexEnd]
 					} else {
 						srcColSecondary[i] = nil
