@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"io"
 	"net/http"
 )
 
@@ -14,20 +15,14 @@ func (b *IngestBuffer) ServeHTTPGet(writer http.ResponseWriter, request *http.Re
 
 	for i := 0; i < len(b.Buffer); i++ {
 		b.Buffer[i].Mux.Lock()
-		if len(b.Buffer[i].Values) > 0 {
+		if b.Buffer[i].Available {
 			w.WriteString(b.Buffer[i].Series + "\n")
 			w.WriteString(b.Buffer[i].Columns + "\n")
-		loop:
-			for {
-				select {
-				case v := <-b.Buffer[i].Values:
-					w.WriteString(v + "\n")
-				default:
-					break loop
-				}
-			}
+			io.Copy(w, b.Buffer[i].File)
+			b.Buffer[i].Available = false
 		}
 		b.Buffer[i].Mux.Unlock()
+
 		if !b.Buffer[i].Active {
 			b.Buffer = append(b.Buffer[:i], b.Buffer[i+1:]...)
 			i--

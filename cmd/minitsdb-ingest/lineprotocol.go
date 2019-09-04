@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/ioutil"
 	"strings"
 	"sync"
 )
@@ -29,10 +30,16 @@ func (l *LineProtocolEmulator) Reset() {
 func (l *LineProtocolEmulator) NewCol(series string) {
 	l.Reset()
 	l.Buffer.Mux.Lock()
+
+	tempFile, err := ioutil.TempFile("/tmp/minitsdb-ingest/", "*.tmp")
+	if err != nil {
+		panic(err)
+	}
+
 	l.Buffer.Buffer = append(l.Buffer.Buffer, PointCollection{
 		Series:  series,
 		Columns: "",
-		Values:  make(chan string, 10000),
+		File:    tempFile,
 		Active:  true,
 		Mux:     sync.Mutex{},
 	})
@@ -59,7 +66,10 @@ func (l *LineProtocolEmulator) Parse(line string) {
 		}
 	case strings.HasPrefix(line, prefixPoint):
 		if l.col != nil && l.col.Series != "" && l.col.Columns != "" {
-			l.col.Values <- line
+			l.col.Mux.Lock()
+			l.col.File.WriteString(line)
+			l.col.Available = true
+			l.col.Mux.Unlock()
 		}
 	}
 }

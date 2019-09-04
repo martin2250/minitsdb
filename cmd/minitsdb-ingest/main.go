@@ -2,15 +2,17 @@ package main
 
 import (
 	"net/http"
+	"os"
 	"sync"
 )
 
 type PointCollection struct {
-	Series  string
-	Columns string
-	Values  chan string
-	Active  bool
-	Mux     sync.Mutex
+	Series    string
+	Columns   string
+	File      *os.File
+	Available bool
+	Active    bool
+	Mux       sync.Mutex
 }
 
 type IngestBuffer struct {
