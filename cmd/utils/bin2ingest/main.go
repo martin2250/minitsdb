@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/binary"
-	"github.com/martin2250/minitsdb/cmd/minitsdb-server/lineprotocol"
+	"github.com/martin2250/minitsdb/pkg/lineprotocol"
 	"io"
 	"io/ioutil"
 	"log"

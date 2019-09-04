@@ -2,7 +2,7 @@ package pointsource
 
 import (
 	ingest2 "github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest"
-	"github.com/martin2250/minitsdb/cmd/minitsdb-server/lineprotocol"
+	"github.com/martin2250/minitsdb/pkg/lineprotocol"
 	"math/rand"
 	"time"
 )

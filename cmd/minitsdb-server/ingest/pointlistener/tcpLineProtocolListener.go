@@ -2,8 +2,7 @@ package pointlistener
 
 import (
 	"bufio"
-	"github.com/martin2250/minitsdb/cmd/minitsdb-server/lineprotocol"
-	"github.com/martin2250/minitsdb/minitsdb"
+	"github.com/martin2250/minitsdb/pkg/lineprotocol"
 	"github.com/sirupsen/logrus"
 	"net"
 )
@@ -11,14 +10,12 @@ import (
 // TCPLineProtocolListener listens for TCP connections, receives points in line protocol format and stores them in the sink
 type TCPListener struct {
 	sink    chan<- lineprotocol.Point
-	db      *minitsdb.Database
 	address string
 }
 
-func NewTCPListener(db *minitsdb.Database, sink chan<- lineprotocol.Point, address string) TCPListener {
+func NewTCPListener(sink chan<- lineprotocol.Point, address string) TCPListener {
 	return TCPListener{
 		sink:    sink,
-		db:      db,
 		address: address,
 	}
 }
@@ -49,7 +46,6 @@ func (l *TCPListener) handleTCP(conn net.Conn) {
 	defer conn.Close()
 
 	scanner := bufio.NewScanner(conn)
-	parser := lineprotocol.NewParser(l.db, l.sink)
 
 	// todo: this should not interpret the last line sent when the connection is closed
 	// instead only interpret lines that actually end with \n
@@ -62,11 +58,13 @@ func (l *TCPListener) handleTCP(conn net.Conn) {
 	}()
 
 	for scanner.Scan() {
-		err := parser.ParseLine(scanner.Text())
+		point, err := lineprotocol.Parse(scanner.Text())
 
 		if err != nil {
 			logrus.WithFields(logrus.Fields{"error": err, "remote": conn.RemoteAddr}).Warning("tcp line protocol error")
 		}
+
+		l.sink <- point
 	}
 
 	if err := scanner.Err(); err != nil {
