@@ -15,6 +15,7 @@ type Configuration struct {
 	ApiTimeout       time.Duration
 
 	TcpListenAddress string
+	UdpListenAddress string
 
 	IngestBufferCapacity int
 
@@ -39,7 +40,8 @@ func readConfigurationFile(confpath string) Configuration {
 		ApiPath:          "/api/",
 		ApiTimeout:       10 * time.Second,
 
-		TcpListenAddress:     ":8081",
+		TcpListenAddress:     ":8001",
+		UdpListenAddress:     ":8001",
 		IngestBufferCapacity: 8192,
 
 		IngestionWorkerCount: 1,

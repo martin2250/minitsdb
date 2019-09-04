@@ -69,6 +69,10 @@ func main() {
 		go shutdownOnError(tcpl.Listen, shutdown, conf.ShutdownTimeout, "TCP listener failed")
 	}
 
+	if conf.UdpListenAddress != "" {
+		go pointlistener.ListenUDP(ingestPoints, conf.UdpListenAddress)
+	}
+
 	timerFlush := time.Tick(1 * time.Second)
 	timerDownsample := time.Tick(1 * time.Second)
 
