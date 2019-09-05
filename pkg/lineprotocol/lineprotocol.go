@@ -17,7 +17,7 @@ type KVP struct {
 
 type Value struct {
 	Tags  []KVP
-	Value float64
+	Value string
 }
 
 type Point struct {
@@ -46,7 +46,7 @@ func (p Point) String() string {
 	for i := range p.Values {
 		writeKVPs(&sb, p.Values[i].Tags)
 		sb.WriteByte(' ')
-		sb.WriteString(strconv.FormatFloat(p.Values[i].Value, 'g', -1, 64))
+		sb.WriteString(p.Values[i].Value)
 		sb.WriteByte('|')
 	}
 
@@ -123,10 +123,10 @@ func parseValue(text string) (Value, error) {
 
 	parts, valueString := parts[:len(parts)-1], parts[len(parts)-1]
 
-	value, err := strconv.ParseFloat(valueString, 64)
-
-	if err != nil {
-		return Value{}, err
+	for _, c := range valueString {
+		if (c < '0' || c > '9') && c != '.' && c != '-' && c != '+' {
+			return Value{}, ErrInvalidFormat
+		}
 	}
 
 	tags, err := parseKVPs(parts)
@@ -137,7 +137,7 @@ func parseValue(text string) (Value, error) {
 
 	return Value{
 		Tags:  tags,
-		Value: value,
+		Value: valueString,
 	}, nil
 }
 

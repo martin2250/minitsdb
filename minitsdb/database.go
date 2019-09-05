@@ -6,6 +6,7 @@ import (
 	"github.com/martin2250/minitsdb/pkg/lineprotocol"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -103,8 +104,14 @@ func (db *Database) AssociatePoint(point lineprotocol.Point) (*Series, storage.P
 			return nil, storage.Point{}, ErrColumnUnknown
 		}
 
+		val, err := strconv.ParseFloat(v.Value, 64)
+
+		if err != nil {
+			return nil, storage.Point{}, err
+		}
+
 		filled[c.IndexPrimary] = true
-		values[c.IndexPrimary] = int64(math.Round(v.Value * math.Pow10(c.Decimals)))
+		values[c.IndexPrimary] = int64(math.Round(val * math.Pow10(c.Decimals)))
 	}
 
 	return s, storage.Point{Values: values}, nil

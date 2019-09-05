@@ -29,7 +29,7 @@ func TestParse(t *testing.T) {
 				Series: []lineprotocol.KVP{{Key: "name", Value: "main"}},
 				Values: []lineprotocol.Value{{
 					Tags:  []lineprotocol.KVP{{Key: "name", Value: "a"}},
-					Value: 1.2,
+					Value: "1.2",
 				}},
 				Time: 3453453,
 			},
