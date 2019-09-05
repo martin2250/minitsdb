@@ -19,7 +19,7 @@ type IngestBuffer struct {
 }
 
 func (b *IngestBuffer) CleanErrors() {
-	for range time.NewTimer(10 * time.Second).C {
+	for range time.NewTicker(10 * time.Second).C {
 		now := time.Now()
 		b.Mux.Lock()
 		rem := b.Errors.Len() - 1000

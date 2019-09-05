@@ -12,6 +12,7 @@ import (
 
 // go tool pprof -web ___go_build_main_go 973220726.pprof
 // ( cd ~/go/src/github.com/martin2250/minitsdb/cmd/minitsdb-server && GOOS=linux GOARCH=arm GOARM=7 go build -ldflags="-w -s" . && scp minitsdb-server martin@192.168.2.91:/home/martin/minitsdb/minitsdb-server )
+// ( cd ~/go/src/github.com/martin2250/minitsdb/cmd/minitsdb-ingest && GOOS=linux GOARCH=arm GOARM=7 go build -ldflags="-w -s" . && scp minitsdb-ingest martin@192.168.2.91:/home/martin/minitsdb/minitsdb-ingest )
 
 func main() {
 	// command line
@@ -69,8 +70,14 @@ func main() {
 		go shutdownOnError(tcpl.Listen, shutdown, conf.ShutdownTimeout, "TCP listener failed")
 	}
 
+	// udp
 	if conf.UdpListenAddress != "" {
 		go pointlistener.ListenUDP(ingestPoints, conf.UdpListenAddress)
+	}
+
+	// http read
+	if conf.IngestAddress != "" {
+		go pointlistener.ReadIngestServer(ingestPoints, conf.IngestAddress)
 	}
 
 	timerFlush := time.Tick(1 * time.Second)
