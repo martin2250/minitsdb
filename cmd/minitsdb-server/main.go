@@ -11,7 +11,7 @@ import (
 )
 
 // go tool pprof -web ___go_build_main_go 973220726.pprof
-// ( cd ~/go/src/github.com/martin2250/minitsdb/cmd/minitsdb-server && GOOS=linux GOARCH=arm GOARM=7 go build -ldflags="-w -s" . && scp minitsdb-server martin@192.168.2.91:/home/martin/minitsdbtest/minitsdb-server )
+// ( cd ~/go/src/github.com/martin2250/minitsdb/cmd/minitsdb-server && GOOS=linux GOARCH=arm GOARM=7 go build -ldflags="-w -s" . && scp minitsdb-server martin@192.168.2.91:/home/martin/minitsdb/minitsdb-server )
 
 func main() {
 	// command line
