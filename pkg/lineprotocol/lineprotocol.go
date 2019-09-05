@@ -16,8 +16,10 @@ type KVP struct {
 }
 
 type Value struct {
-	Tags  []KVP
-	Value float64
+	Tags []KVP
+
+	Value    int64
+	Decimals int
 }
 
 type Point struct {
@@ -56,120 +58,148 @@ func (p Point) String() string {
 }
 
 var ErrInvalidFormat = errors.New("invalid format")
+var ErrTooLong = errors.New("input exceeds maximum length")
+var ErrInvalidSym = errors.New("input has invalid symbols")
 
-func Parse(line string) (Point, error) {
-	parts := strings.Split(line, "|")
+type parserState int
 
-	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
+const (
+	stateSeries parserState = iota
+	stateColumn
+	stateTime
+	stateBetween
+)
+
+type kvState int
+
+const (
+	stateKey kvState = iota
+	stateValue
+	stateDone
+	stateError
+)
+
+func Parse(line []byte) (Point, error) {
+	// maximum length
+	if len(line) > 8192 {
+		return Point{}, ErrTooLong
 	}
 
-	if len(parts) < 3 {
+	// minimum useful length
+	if len(line) < 10 {
 		return Point{}, ErrInvalidFormat
 	}
 
-	// split off series and time
-	var partSeries, partTime string
-	{
-		l := len(parts)
-		partSeries, parts, partTime = parts[0], parts[1:l-1], parts[l-1]
+	// check for characters that aren't allowed
+	if !CheckSymbols(line) {
+		return Point{}, ErrInvalidSym
 	}
 
-	// parse timePoint
-	var timePoint int64
-	if partTime != "" {
-		var err error
-		timePoint, err = strconv.ParseInt(partTime, 10, 64)
+	p := Point{}
 
-		if err != nil {
-			return Point{}, err
+	state := stateSeries
+	indexStartToken := 0
+	indexStartKV := 0
+
+	kvp := KVP{}
+	val := Value{}
+
+	var key, value []byte
+
+	for i, b := range line {
+		t := checkChar(line[i])
+
+		if t != letter && t != number {
+			if key == nil {
+
+			}
 		}
-	} else {
-		timePoint = time.Now().Unix()
-	}
 
-	// parse series tags
-	tags, err := parseKVPs(strings.Fields(partSeries))
+		switch state {
 
-	if err != nil {
-		return Point{}, err
-	}
+		case stateKvKey:
+			switch t {
+			case space:
+				indexStart = i + 1
+			case letter, number:
+				continue
+			case colon:
+				kvp.Key = string(line[indexStart:i])
+				indexStart = i + 1
+				state = stateKvVal
+			default:
+				return Point{}, ErrInvalidFormat
+			}
 
-	// parse Values
-	values := make([]Value, len(parts))
+		case stateKvVal:
+			switch t {
+			case letter, number:
+				continue
+			case space, pipe:
+				kvp.Value = string(line[indexStart:i])
+				state = stateBetween
+				if seriesDone {
+					val.Tags = append(val.Tags, kvp)
+				} else {
+					p.Series = append(p.Series, kvp)
+				}
+				if t == pipe {
+					seriesDone = true
+				}
+			default:
+				return Point{}, ErrInvalidFormat
+			}
 
-	for i := range parts {
-		values[i], err = parseValue(parts[i])
+		case stateBetween:
+			switch t {
 
-		if err != nil {
-			return Point{}, err
-		}
-	}
-
-	return Point{
-		Series: tags,
-		Values: values,
-		Time:   timePoint,
-	}, nil
-}
-
-func parseValue(text string) (Value, error) {
-	parts := strings.Fields(strings.TrimSpace(text))
-
-	// need at least name and value
-	if len(parts) < 2 {
-		return Value{}, ErrInvalidFormat
-	}
-
-	parts, valueString := parts[:len(parts)-1], parts[len(parts)-1]
-
-	value, err := strconv.ParseFloat(valueString, 64)
-
-	if err != nil {
-		return Value{}, err
-	}
-
-	tags, err := parseKVPs(parts)
-
-	if err != nil {
-		return Value{}, err
-	}
-
-	return Value{
-		Tags:  tags,
-		Value: value,
-	}, nil
-}
-
-func parseKVPs(text []string) ([]KVP, error) {
-	kvps := make([]KVP, len(text))
-	var err error
-
-	for i := range text {
-		kvps[i], err = parseKVP(text[i])
-
-		if err != nil {
-			return nil, err
+			}
 		}
 	}
-	return kvps, nil
 }
 
-func parseKVP(text string) (KVP, error) {
-	i := strings.IndexRune(text, ':')
+type charType byte
 
-	// return error if ':' is
-	// not present
-	// the first rune
-	// the last rune
-	if i < 1 || i == len(text)-1 {
-		return KVP{}, ErrInvalidFormat
+const (
+	letter charType = iota
+	number
+	other
+	pipe  charType = '|'
+	colon charType = ':'
+	space charType = ' '
+)
+
+func checkChar(b byte) charType {
+	if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '_' {
+		return letter
 	}
 
-	return KVP{
-		Key:   text[:i],
-		Value: text[i+1:],
-	}, nil
+	if (b >= '0' && b <= '9') || b == '.' || b == '-' {
+		return number
+	}
+
+	if b == '|' || b == ':' || b == ' ' {
+		return charType(b)
+	}
+
+	return other
+}
+
+// CheckSymbols checks if the line contains symbols other than
+// a-z A-Z 0-9 . : | space -
+func CheckSymbols(line []byte) bool {
+	l := len(line)
+	for i := 0; i < l; i++ {
+		t := checkChar(line[i])
+
+		if t != other {
+			continue
+		}
+
+		return false
+	}
+
+	return true
 }
 
 func MatchKVPs(kvps []KVP, tags map[string]string) bool {
