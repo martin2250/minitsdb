@@ -10,7 +10,8 @@ import (
 type Configuration struct {
 	Series map[string]string
 
-	Address string
+	Address  string
+	Protocol string
 
 	Sources []yaml.Node
 

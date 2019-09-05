@@ -27,35 +27,13 @@ func diffTimes(t1, t2 cpu.TimesStat) (user, system, busy, total float64) {
 	return u2 - u1, s2 - s1, b2 - b1, to2 - to1
 }
 
-func (s *CPU) Variables() ([]string, error) {
+func (s *CPU) Init() error {
 	var err error
 	s.timesLast, err = cpu.Times(s.PerCPU)
-
-	if err != nil {
-		return nil, err
-	}
-
-	count := len(s.timesLast)
-	if s.SystemUser {
-		count *= 3
-	}
-
-	cols := make([]string, count)
-	j := 0
-
-	for _, t := range s.timesLast {
-		cols[j] = fmt.Sprintf("name:load cpu:%s stat:%s", t.CPU, "busy")
-		j++
-		if s.SystemUser {
-			cols[j] = fmt.Sprintf("name:load cpu:%s stat:%s", t.CPU, "user")
-			cols[j+1] = fmt.Sprintf("name:load cpu:%s stat:%s", t.CPU, "system")
-			j += 2
-		}
-	}
-	return cols, nil
+	return err
 }
 
-func (s *CPU) Read() ([]float64, error) {
+func (s *CPU) Read() ([]string, error) {
 	timesNow, err := cpu.Times(s.PerCPU)
 
 	if err != nil {
@@ -74,7 +52,7 @@ func (s *CPU) Read() ([]float64, error) {
 		count *= 3
 	}
 
-	values := make([]float64, count)
+	values := make([]string, count)
 	j := 0
 
 	for i := range timesNow {
@@ -84,12 +62,12 @@ func (s *CPU) Read() ([]float64, error) {
 			return nil, errors.New("total time is <= zero")
 		}
 
-		values[j] = timeBusy / timeTotal
+		values[j] = fmt.Sprintf("name:load cpu:%s stat:busy %0.3f", timesNow[i].CPU, timeBusy/timeTotal)
 		j++
 
 		if s.SystemUser {
-			values[j] = timeUser / timeTotal
-			values[j+1] = timeSystem / timeTotal
+			values[j] = fmt.Sprintf("name:load cpu:%s stat:user %0.3f", timesNow[i].CPU, timeUser/timeTotal)
+			values[j+1] = fmt.Sprintf("name:load cpu:%s stat:system %0.3f", timesNow[i].CPU, timeSystem/timeTotal)
 			j += 2
 		}
 	}

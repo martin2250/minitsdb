@@ -1,8 +1,9 @@
 package main
 
 import (
-	"fmt"
+	"io"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -15,59 +16,53 @@ func main() {
 
 	sources := loadSources(conf.Sources)
 
-	conn, err := net.DialTimeout("tcp", conf.Address, 500*time.Millisecond)
-
+	var err error
+	var w io.Writer
+	if opts.Stdout {
+		w = os.Stdout
+	} else {
+		switch conf.Protocol {
+		case "tcp", "udp":
+			w, err = net.DialTimeout(conf.Protocol, conf.Address, 500*time.Millisecond)
+		default:
+			panic("unknown protocol")
+		}
+	}
 	if err != nil {
 		panic(err)
 	}
 
-	{
-		var tags string
+	for _, s := range sources {
+		if err = s.Init(); err != nil {
+			panic(err)
+		}
+	}
+
+	for timestamp := range time.NewTicker(conf.Interval).C {
+		sb := strings.Builder{}
+
 		for k, v := range conf.Series {
-			tags += " " + k + ":" + v
+			sb.WriteString(k)
+			sb.WriteByte(':')
+			sb.WriteString(v)
+			sb.WriteByte(' ')
 		}
+		sb.WriteByte('|')
 
-		_, err = fmt.Fprintf(conn, "SERIES%s\n", tags)
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	{
-		var columns []string
-		for _, s := range sources {
-			cols, err := s.Variables()
-
-			if err != nil {
-				panic(err)
-			}
-
-			columns = append(columns, cols...)
-		}
-
-		_, err = fmt.Fprintf(conn, "COLUMNS %s\n", strings.Join(columns, "|"))
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	timer := time.NewTicker(conf.Interval)
-
-	for {
-		<-timer.C
-
-		var variables []string
 		for _, s := range sources {
 			vars, err := s.Read()
 			if err != nil {
 				panic(err)
 			}
 			for _, v := range vars {
-				variables = append(variables, strconv.FormatFloat(v, 'g', -1, 64))
+				sb.WriteString(v)
+				sb.WriteByte('|')
 			}
 		}
+		sb.WriteString(strconv.FormatInt(timestamp.Unix(), 10))
+		sb.WriteByte('\n')
 
-		_, err = fmt.Fprintf(conn, "POINT %s %d\n", strings.Join(variables, " "), time.Now().Unix())
+		_, err = w.Write([]byte(sb.String()))
 		if err != nil {
 			panic(err)
 		}

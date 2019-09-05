@@ -16,23 +16,14 @@ type File struct {
 	Tags map[string]string
 }
 
-func (f *File) Variables() ([]string, error) {
+func (f *File) Init() error {
 	if _, ok := f.Tags["name"]; !ok {
-		return nil, errors.New("name tag must be present")
+		return errors.New("name tag must be present")
 	}
-
-	tags := make([]string, 0, len(f.Tags))
-
-	for k, v := range f.Tags {
-		tags = append(tags, fmt.Sprintf("%s:%s", k, v))
-	}
-
-	desc := strings.Join(tags, " ")
-
-	return []string{desc}, nil
+	return nil
 }
 
-func (f *File) Read() ([]float64, error) {
+func (f *File) Read() ([]string, error) {
 	file, err := os.Open(f.Path)
 
 	if err != nil {
@@ -52,13 +43,23 @@ func (f *File) Read() ([]float64, error) {
 	s := string(data[:n])
 	s = strings.TrimSpace(s)
 
-	value, err := strconv.ParseFloat(s, 64)
+	if f.Factor != 1.0 {
+		value, err := strconv.ParseFloat(s, 64)
 
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
+
+		s = strconv.FormatFloat(value*f.Factor, 'g', -1, 64)
 	}
 
-	value *= f.Factor
+	point := ""
 
-	return []float64{value}, nil
+	for k, v := range f.Tags {
+		point += fmt.Sprintf("%s:%s ", k, v)
+	}
+
+	point += s
+
+	return []string{point}, nil
 }

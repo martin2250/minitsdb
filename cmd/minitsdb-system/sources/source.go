@@ -6,8 +6,8 @@ import (
 )
 
 type Source interface {
-	Read() ([]float64, error)
-	Variables() ([]string, error)
+	Read() ([]string, error)
+	Init() error
 }
 
 type SourceGenerator func(node yaml.Node) (Source, error)
@@ -50,7 +50,6 @@ func init() {
 	Sources["ram"] = func(node yaml.Node) (source Source, e error) {
 		ram := struct {
 			Buffered bool
-			Unit     string
 		}{}
 
 		err := node.Decode(&ram)
@@ -59,26 +58,8 @@ func init() {
 			return nil, err
 		}
 
-		factor := 1.0
-		switch ram.Unit {
-		case "GB":
-			factor *= 1024
-			fallthrough
-		case "MB":
-			factor *= 1024
-			fallthrough
-		case "KB":
-			factor *= 1024
-			fallthrough
-		case "B":
-			break
-		default:
-			return nil, errors.New("unknown unit")
-		}
-
 		return &RAM{
 			Buffered: ram.Buffered,
-			Factor:   factor,
 		}, nil
 	}
 }

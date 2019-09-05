@@ -7,6 +7,7 @@ import (
 
 type CommandLineOptions struct {
 	ConfigPath string `short:"c" long:"config" description:"configuration file"`
+	Stdout     bool   `long:"stdout" description:"send output to stdout instead of sink"`
 }
 
 func readCommandLineOptions() CommandLineOptions {
