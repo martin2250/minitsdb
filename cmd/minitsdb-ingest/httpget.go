@@ -2,30 +2,40 @@ package main
 
 import (
 	"bufio"
-	"io"
+	"github.com/martin2250/minitsdb/pkg/lineprotocol"
 	"net/http"
 )
 
-func (b *IngestBuffer) ServeHTTPGet(writer http.ResponseWriter, request *http.Request) {
+func (b *IngestBuffer) ServeHTTPRead(writer http.ResponseWriter, request *http.Request, discard bool) {
 	b.Mux.Lock()
 	defer b.Mux.Unlock()
 
 	w := bufio.NewWriter(writer)
 	defer w.Flush()
 
-	for i := 0; i < len(b.Buffer); i++ {
-		b.Buffer[i].Mux.Lock()
-		if b.Buffer[i].Available {
-			w.WriteString(b.Buffer[i].Series + "\n")
-			w.WriteString(b.Buffer[i].Columns + "\n")
-			io.Copy(w, b.Buffer[i].File)
-			b.Buffer[i].Available = false
-		}
-		b.Buffer[i].Mux.Unlock()
+	for e := b.Points.Front(); e != nil; e = e.Next() {
+		point := e.Value.(lineprotocol.Point)
+		w.WriteString(point.String())
+		w.WriteByte('\n')
+	}
 
-		if !b.Buffer[i].Active {
-			b.Buffer = append(b.Buffer[:i], b.Buffer[i+1:]...)
-			i--
-		}
+	if discard {
+		b.Points.Init()
+	}
+}
+
+func (b *IngestBuffer) ServeHTTPErrors(writer http.ResponseWriter, request *http.Request) {
+	b.Mux.Lock()
+	defer b.Mux.Unlock()
+
+	w := bufio.NewWriter(writer)
+	defer w.Flush()
+
+	for e := b.Errors.Back(); e != nil; e = e.Prev() {
+		err := e.Value.(Error)
+		w.WriteString(err.Time.String())
+		w.WriteString(": ")
+		w.WriteString(err.Text)
+		w.WriteByte('\n')
 	}
 }
