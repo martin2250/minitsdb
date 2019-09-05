@@ -4,11 +4,12 @@ import (
 	"github.com/martin2250/minitsdb/pkg/lineprotocol"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func BenchmarkLineProtocol(b *testing.B) {
 	for n := 0; n < b.N; n++ {
-		lineprotocol.Parse("name:sensor loc:weatherstation|name:temperature pos:outside 24.34|name:pressure pos:outside 1013.13|name: test 12.1231|124323542354")
+		lineprotocol.Parse([]byte("name:sensor loc:weatherstation|name:temperature pos:outside 24.34|name:pressure pos:outside 1013.13|name: test 12.1231|124323542354"))
 	}
 }
 
@@ -23,13 +24,24 @@ func TestParse(t *testing.T) {
 		wantErr bool
 	}{
 		{
+			name: "notime",
+			args: args{line: "name:main|name:a 1.2|"},
+			want: lineprotocol.Point{
+				Series: []lineprotocol.KVP{{Key: "name", Value: "main"}},
+				Values: []lineprotocol.Value{{
+					Tags:  []lineprotocol.KVP{{Key: "name", Value: "a"}},
+					Value: "1.2",
+				}},
+				Time: time.Now().Unix(),
+			},
+		}, {
 			name: "normal",
 			args: args{line: "name:main|name:a 1.2|3453453"},
 			want: lineprotocol.Point{
 				Series: []lineprotocol.KVP{{Key: "name", Value: "main"}},
 				Values: []lineprotocol.Value{{
 					Tags:  []lineprotocol.KVP{{Key: "name", Value: "a"}},
-					Value: 1.2,
+					Value: "1.2",
 				}},
 				Time: 3453453,
 			},
@@ -37,7 +49,7 @@ func TestParse(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := lineprotocol.Parse(tt.args.line)
+			got, err := lineprotocol.Parse([]byte(tt.args.line))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
 				return

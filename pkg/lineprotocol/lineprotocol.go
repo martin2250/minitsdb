@@ -16,10 +16,8 @@ type KVP struct {
 }
 
 type Value struct {
-	Tags []KVP
-
-	Value    int64
-	Decimals int
+	Tags  []KVP
+	Value string // don't parse yet, need number of decimals from matching column
 }
 
 type Point struct {
@@ -48,7 +46,7 @@ func (p Point) String() string {
 	for i := range p.Values {
 		writeKVPs(&sb, p.Values[i].Tags)
 		sb.WriteByte(' ')
-		sb.WriteString(strconv.FormatFloat(p.Values[i].Value, 'g', -1, 64))
+		sb.WriteString(p.Values[i].Value)
 		sb.WriteByte('|')
 	}
 
@@ -61,23 +59,106 @@ var ErrInvalidFormat = errors.New("invalid format")
 var ErrTooLong = errors.New("input exceeds maximum length")
 var ErrInvalidSym = errors.New("input has invalid symbols")
 
-type parserState int
+func parseKVP(text []byte, types []charType) (KVP, bool) {
+	kvp := KVP{}
+	indexStart := 0
+	for i := range text {
+		switch types[i] {
+		case letter, number:
+			continue
+		case colon:
+			break
+		default:
+			return KVP{}, false
+		}
+		// found colon
+		if indexStart != 0 {
+			// found second colon
+			return KVP{}, false
+		}
+		if i == 0 {
+			return KVP{}, false
+		}
+		indexStart = i + 1
+		kvp.Key = string(text[:i])
+	}
+	if indexStart == 0 || indexStart == len(text) {
+		return KVP{}, false
+	}
+	kvp.Value = string(text[indexStart:])
+	return kvp, true
+}
 
-const (
-	stateSeries parserState = iota
-	stateColumn
-	stateTime
-	stateBetween
-)
+func parseValue(text []byte, types []charType) (Value, bool) {
+	v := Value{}
+	indexStart := 0
+	numeric := true
+	for i, t := range types {
+		switch t {
+		case colon, letter:
+			numeric = false
+			continue
+		case number:
+			continue
+		case space:
+			break
+		default:
+			return Value{}, false
+		}
+		//if indexStart == i {
+		//	indexStart = i + 1
+		//	continue // allow multiple spaces
+		//}
+		if numeric {
+			return Value{}, false
+		}
+		kvp, ok := parseKVP(text[indexStart:i], types[indexStart:i])
+		if !ok {
+			return Value{}, false
+		}
+		v.Tags = append(v.Tags, kvp)
+		numeric = true
+		indexStart = i + 1
+	}
+	if v.Tags == nil || !numeric || indexStart == len(text) {
+		return Value{}, false
+	}
+	v.Value = string(text[indexStart:])
+	return v, true
+}
 
-type kvState int
-
-const (
-	stateKey kvState = iota
-	stateValue
-	stateDone
-	stateError
-)
+func parseKVPs(text []byte, types []charType) ([]KVP, bool) {
+	var kvps []KVP
+	indexStart := 0
+	for i, t := range types {
+		switch t {
+		case colon, letter, number:
+			continue
+		case space:
+			break
+		default:
+			return nil, false
+		}
+		//if indexStart == i {
+		//	indexStart = i + 1
+		//	continue // allow multiple spaces
+		//}
+		kvp, ok := parseKVP(text[indexStart:i], types[indexStart:i])
+		if !ok {
+			return nil, false
+		}
+		kvps = append(kvps, kvp)
+		indexStart = i + 1
+	}
+	if indexStart != len(types) {
+		kvp, ok := parseKVP(text[indexStart:], types[indexStart:])
+		if !ok {
+			return nil, false
+		}
+		kvps = append(kvps, kvp)
+	}
+	return kvps, kvps != nil
+}
 
 func Parse(line []byte) (Point, error) {
 	// maximum length
@@ -85,77 +166,74 @@ func Parse(line []byte) (Point, error) {
 		return Point{}, ErrTooLong
 	}
 
+	//line = bytes.TrimSpace(line)
+
 	// minimum useful length
 	if len(line) < 10 {
 		return Point{}, ErrInvalidFormat
 	}
 
+	types := make([]charType, len(line))
+
 	// check for characters that aren't allowed
-	if !CheckSymbols(line) {
+	if !CheckSymbols(line, types) {
 		return Point{}, ErrInvalidSym
 	}
 
 	p := Point{}
-
-	state := stateSeries
-	indexStartToken := 0
-	indexStartKV := 0
-
-	kvp := KVP{}
-	val := Value{}
-
-	var key, value []byte
-
-	for i, b := range line {
-		t := checkChar(line[i])
-
-		if t != letter && t != number {
-			if key == nil {
-
-			}
+	indexStart := 0
+	numeric := true
+	hasTime := false
+	for i, t := range types {
+		switch t {
+		case colon, letter, space:
+			numeric = false
+			continue
+		case number:
+			continue
+		case pipe:
+			break
+		default:
+			return Point{}, ErrInvalidFormat
 		}
-
-		switch state {
-
-		case stateKvKey:
-			switch t {
-			case space:
-				indexStart = i + 1
-			case letter, number:
-				continue
-			case colon:
-				kvp.Key = string(line[indexStart:i])
-				indexStart = i + 1
-				state = stateKvVal
-			default:
+		if i == len(types)-1 {
+			p.Time = time.Now().Unix()
+			hasTime = true
+			break
+		}
+		if numeric {
+			return Point{}, ErrInvalidFormat
+		}
+		if indexStart == 0 {
+			var ok bool
+			p.Series, ok = parseKVPs(line[:i], types[:i])
+			if !ok {
 				return Point{}, ErrInvalidFormat
 			}
-
-		case stateKvVal:
-			switch t {
-			case letter, number:
-				continue
-			case space, pipe:
-				kvp.Value = string(line[indexStart:i])
-				state = stateBetween
-				if seriesDone {
-					val.Tags = append(val.Tags, kvp)
-				} else {
-					p.Series = append(p.Series, kvp)
-				}
-				if t == pipe {
-					seriesDone = true
-				}
-			default:
+		} else {
+			v, ok := parseValue(line[indexStart:i], types[indexStart:i])
+			if !ok {
 				return Point{}, ErrInvalidFormat
 			}
-
-		case stateBetween:
-			switch t {
-
-			}
+			p.Values = append(p.Values, v)
+		}
+		numeric = true
+		indexStart = i + 1
+	}
+	if p.Values == nil {
+		return Point{}, ErrInvalidFormat
+	}
+	if !numeric {
+		return Point{}, ErrInvalidFormat
+	}
+	if !hasTime {
+		var err error
+		p.Time, err = strconv.ParseInt(string(line[indexStart:]), 10, 64)
+		if err != nil {
+			return Point{}, err
 		}
 	}
+	return p, nil
 }
 
 type charType byte
@@ -187,18 +265,15 @@ func checkChar(b byte) charType {
 
 // CheckSymbols checks if the line contains symbols other than
 // a-z A-Z 0-9 . : | space -
-func CheckSymbols(line []byte) bool {
+func CheckSymbols(line []byte, types []charType) bool {
 	l := len(line)
 	for i := 0; i < l; i++ {
 		t := checkChar(line[i])
-
-		if t != other {
-			continue
+		types[i] = t
+		if t == other {
+			return false
 		}
-
-		return false
 	}
-
 	return true
 }
 
