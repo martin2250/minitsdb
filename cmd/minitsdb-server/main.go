@@ -6,7 +6,9 @@ import (
 	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest/pointlistener"
 	"github.com/martin2250/minitsdb/pkg/lineprotocol"
 	"github.com/sirupsen/logrus"
+	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"time"
 )
 
@@ -50,9 +52,6 @@ func main() {
 		routerApi := r.PathPrefix(conf.ApiPath).Subrouter()
 		api.Register(&db, routerApi)
 
-		httpl := pointlistener.NewHTTPHandler(ingestPoints)
-		routerApi.Handle("/insert", &httpl)
-
 		srv := &http.Server{
 			Addr:    conf.ApiListenAddress,
 			Handler: r,
@@ -65,16 +64,10 @@ func main() {
 		go shutdownOnError(srv.ListenAndServe, shutdown, conf.ShutdownTimeout, "HTTP server failed")
 	}
 
-	// tcp
-	if conf.TcpListenAddress != "" {
-		tcpl := pointlistener.NewTCPListener(ingestPoints, conf.TcpListenAddress)
-		go shutdownOnError(tcpl.Listen, shutdown, conf.ShutdownTimeout, "TCP listener failed")
-	}
-
-	// udp
-	if conf.UdpListenAddress != "" {
-		go pointlistener.ListenUDP(ingestPoints, conf.UdpListenAddress)
-	}
+	// debug/pprof interface
+	go func() {
+		log.Println(http.ListenAndServe(":6060", nil))
+	}()
 
 	// http read
 	if conf.IngestAddress != "" {
