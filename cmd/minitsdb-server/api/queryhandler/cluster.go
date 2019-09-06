@@ -49,7 +49,8 @@ func (c *QueryCluster) Execute() error {
 
 	query := c.Parameters.Series.Query(columns, c.Parameters.Range, c.Parameters.TimeStep)
 
-	defer query.Close()
+	query.Bucket.Mux.RLock()
+	defer query.Bucket.Mux.RUnlock()
 
 	defer func() {
 		for _, subQuery := range c.SubQueries {

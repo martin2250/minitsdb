@@ -109,7 +109,6 @@ func (b *Bucket) DownsampleStartup() error {
 		Start: b.Next.LastTimeOnDisk + b.Next.TimeStep,
 		End:   math.MaxInt64 - b.Next.TimeStep*100,
 	}, b.Next.TimeStep)
-	defer query.Close()
 
 	for {
 		buffer, err := query.Next()

@@ -22,8 +22,6 @@ type DataFile struct {
 	// TimeStart and TimeEnd hold the time range stored in this file
 	TimeStart int64
 	TimeEnd   int64
-	// don't read while writing (only lock while actually reading / writing a block, file may be opened by multiple workers at once)
-	Mut sync.RWMutex
 }
 
 // ReadBlock reads the n-th block of a file
@@ -40,9 +38,7 @@ func (f *DataFile) ReadBlock(n int64) (bytes.Buffer, error) {
 		return bytes.Buffer{}, err
 	}
 
-	f.Mut.RLock()
 	buf, err := util.ReadBlock(file)
-	f.Mut.RUnlock()
 
 	return buf, err
 }
@@ -60,9 +56,6 @@ func (f *DataFile) WriteBlock(buffer bytes.Buffer, overwrite bool) error {
 	if f.Blocks == 0 {
 		overwrite = false
 	}
-
-	f.Mut.Lock()
-	defer f.Mut.Unlock()
 
 	// only use seek when overwriting
 	if overwrite {
@@ -118,23 +111,6 @@ func (r *DataFileReader) Seek(offset int64, whence int) (ret int64, err error) {
 func (r *DataFileReader) Close() error {
 	r.mut.RUnlock()
 	return r.f.Close()
-}
-
-func (f *DataFile) GetReader() (*DataFileReader, error) {
-	handle, err := os.Open(f.Path)
-
-	if err != nil {
-		return nil, err
-	}
-
-	r := DataFileReader{
-		mut: &f.Mut,
-		f:   handle,
-	}
-
-	r.mut.RLock()
-
-	return &r, nil
 }
 
 func NewDataFile(basePath string, timeStart int64, timeRange int64) *DataFile {

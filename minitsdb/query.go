@@ -25,7 +25,7 @@ type Query struct {
 	bufferIndexStart int
 	reader           storage.FileDecoder
 
-	bucket *Bucket
+	Bucket *Bucket
 
 	columns      []QueryColumn
 	needIndex    []int
@@ -107,7 +107,6 @@ func (q *Query) Next() (storage.PointBuffer, error) {
 	}
 
 	if !q.primed {
-		q.bucket.Mux.RLock()
 		err := q.SkipBlocks()
 		if err == io.EOF {
 			q.atEnd = true
@@ -128,14 +127,14 @@ func (q *Query) Next() (storage.PointBuffer, error) {
 	}
 
 	if q.atEnd {
-		for i := range q.bucket.Buffer.Values[0] {
-			if q.timeRange.Contains(q.bucket.Buffer.Values[0][i]) {
-				q.buffer.InsertPoint(q.bucket.Buffer.At(i))
+		for i := range q.Bucket.Buffer.Values[0] {
+			if q.timeRange.Contains(q.Bucket.Buffer.Values[0][i]) {
+				q.buffer.InsertPoint(q.Bucket.Buffer.At(i))
 			}
 		}
 	}
 
-	output := DownsampleQuery(q.buffer, q.columns, q.timeStep, false, &q.bufferIndexStart, q.bucket.First)
+	output := DownsampleQuery(q.buffer, q.columns, q.timeStep, false, &q.bufferIndexStart, q.Bucket.First)
 
 	if output.Len() > 0 {
 		q.timeRange.Start = output.Values[0][output.Len()-1] + q.timeStep
@@ -224,14 +223,10 @@ func (b *Bucket) Query(columns []QueryColumn, timeRange TimeRange, timeStep int6
 		needIndex:    needIndex,
 		transformers: transformers,
 
-		bucket: b,
+		Bucket: b,
 	}
 
 	query.buffer.Need = decoderNeed
 
 	return &query
-}
-
-func (q *Query) Close() {
-	q.bucket.Mux.RUnlock()
 }

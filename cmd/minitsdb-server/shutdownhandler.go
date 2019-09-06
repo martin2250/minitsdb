@@ -18,7 +18,7 @@ func gracefulShutdown(shutdown chan<- bool, timeout time.Duration) {
 	<-sigs
 
 	log.Warning("Received shutdown signal")
-	shutdown <- true
+	close(shutdown)
 	time.Sleep(timeout)
 	log.Fatal("Graceful shutdown timed out")
 }
@@ -30,7 +30,7 @@ func shutdownOnError(f func() error, shutdown chan<- bool, timeout time.Duration
 	err := f()
 
 	log.WithError(err).Warning(message)
-	shutdown <- true
+	close(shutdown)
 	time.Sleep(timeout)
 	log.Fatal("Graceful shutdown timed out")
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/martin2250/minitsdb/minitsdb/storage/encoding"
 	"io"
+	"os"
 )
 
 type decoderState int
@@ -18,7 +19,7 @@ const (
 type FileDecoder struct {
 	files       []*DataFile // files to be read
 	decoder     encoding.Decoder
-	currentFile *DataFileReader // file that is currently being read (only held for closing)
+	currentFile *os.File // file that is currently being read (only held for closing)
 	state       decoderState
 }
 
@@ -30,7 +31,7 @@ func (d *FileDecoder) nextFile() error {
 	d.Close()
 
 	var err error
-	d.currentFile, err = d.files[0].GetReader()
+	d.currentFile, err = os.Open(d.files[0].Path)
 
 	if err != nil {
 		return err
