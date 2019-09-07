@@ -3,14 +3,14 @@ package queryhandler
 import (
 	"encoding/json"
 	. "github.com/martin2250/minitsdb/minitsdb/types"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"net/http"
 	"sync"
 	"time"
 )
 
 func logHTTPError(w http.ResponseWriter, r *http.Request, error string, code int) {
-	log.WithFields(log.Fields{
+	logrus.WithFields(logrus.Fields{
 		"code":   code,
 		"error":  error,
 		"client": r.RemoteAddr,
@@ -20,6 +20,12 @@ func logHTTPError(w http.ResponseWriter, r *http.Request, error string, code int
 }
 
 func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if r := recover(); r != nil {
+			logrus.WithField("panic", r).Error("panic in ServeHTTP/query")
+		}
+	}()
+
 	desc, err := parseQuery(r.Body)
 
 	if err != nil {
@@ -56,7 +62,7 @@ func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//	querySinkTemplate.Writer = gz
 	//}
 
-	h.log.WithFields(log.Fields{
+	h.log.WithFields(logrus.Fields{
 		"remote":  r.RemoteAddr,
 		"series":  desc.Series,
 		"queries": len(subqueries),
@@ -117,11 +123,17 @@ func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.pendingQueries[params] = cluster
 			// todo: make this configurable
 			time.AfterFunc(25*time.Millisecond, func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logrus.WithField("panic", r).Error("panic in ServeHTTP/query/Execute")
+					}
+				}()
+
 				h.mux.Lock()
 				delete(h.pendingQueries, cluster.Parameters)
 				h.mux.Unlock()
 
-				h.log.WithFields(log.Fields{
+				h.log.WithFields(logrus.Fields{
 					"series":    cluster.Parameters.Series.Tags,
 					"range":     cluster.Parameters.Range,
 					"step":      cluster.Parameters.TimeStep,
