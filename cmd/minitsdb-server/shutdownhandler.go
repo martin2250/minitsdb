@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-// gracefulShutdown waits for a SIGINT or SIGTERM signal
+// listenShutdown waits for a SIGINT or SIGTERM signal
 // when a signal was received, it sends true to the channel
 // after the timeout, it will force a shutdown
-func gracefulShutdown(shutdown chan<- bool, timeout time.Duration) {
+func listenShutdown(shutdown chan<- struct{}, timeout time.Duration) {
 	sigs := make(chan os.Signal)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 

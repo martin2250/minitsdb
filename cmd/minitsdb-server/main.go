@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/gorilla/mux"
 	"github.com/martin2250/minitsdb/cmd/minitsdb-server/api"
 	"github.com/martin2250/minitsdb/cmd/minitsdb-server/ingest/pointlistener"
 	"github.com/martin2250/minitsdb/pkg/lineprotocol"
@@ -27,66 +26,56 @@ func main() {
 	}
 
 	// configuration
-	conf := readConfigurationFile(opts.ConfigPath)
-	if conf.DatabasePath != "" {
-		opts.DatabasePath = conf.DatabasePath
+	var conf Configuration
+	if opts.ConfigPath == "" {
+		conf = ConfigDefault
+	} else {
+		conf = readConfigurationFile(opts.ConfigPath)
+	}
+
+	if opts.DatabasePath != "" {
+		conf.DatabasePath = opts.DatabasePath
 	}
 
 	// logrus hooks
 	logAddBackends(conf)
 
 	// shutdown
-	shutdown := make(chan bool)
-	go gracefulShutdown(shutdown, conf.ShutdownTimeout)
+	shutdown := make(chan struct{})
+	go listenShutdown(shutdown, conf.ShutdownTimeout)
 
 	// database
-	db := loadDatabase(opts.DatabasePath)
+	db := loadDatabase(conf.DatabasePath)
 
 	// ingestion
-	ingestPoints := make(chan lineprotocol.Point, conf.IngestBufferCapacity)
+	ingestPoints := make(chan lineprotocol.Point, conf.Ingest.Buffer)
 
 	// http
-	if conf.ApiPath != "" {
-		r := mux.NewRouter() // move this out of the if block when more handlers are added
-
-		routerApi := r.PathPrefix(conf.ApiPath).Subrouter()
-		api.Register(&db, routerApi)
-
-		srv := &http.Server{
-			Addr:    conf.ApiListenAddress,
-			Handler: r,
-
-			ReadHeaderTimeout: conf.ApiTimeout,
-			ReadTimeout:       conf.ApiTimeout,
-			WriteTimeout:      conf.ApiTimeout,
-			IdleTimeout:       conf.ApiTimeout,
-		}
-		go shutdownOnError(srv.ListenAndServe, shutdown, conf.ShutdownTimeout, "HTTP server failed")
+	if conf.API.Address != "" {
+		go api.Start(&db, conf.API, shutdown)
 	}
 
-	// debug/pprof interface
+	// ingest
+	go pointlistener.ReadIngestServer(ingestPoints, conf.Ingest.Servers, shutdown)
+
+	// debug/pprof interface todo: make optional
 	go func() {
 		log.Println(http.ListenAndServe(":6060", nil))
 	}()
 
-	// http read
-	if conf.IngestAddress != "" {
-		go pointlistener.ReadIngestServer(ingestPoints, conf.IngestAddress)
-	}
-
-	timerFlush := time.Tick(1 * time.Second)
-	timerDownsample := time.Tick(1 * time.Second)
+	timerTick := time.Tick(1 * time.Second)
 
 LoopMain:
 	for {
 		select {
-		case <-timerFlush:
+		case <-timerTick:
+			db.Downsample()
 			db.FlushSeries()
 
-		case <-timerDownsample:
-			db.Downsample()
-
-		case point := <-ingestPoints:
+		case point, ok := <-ingestPoints:
+			if !ok {
+				break LoopMain
+			}
 			s, p, err := db.AssociatePoint(point)
 
 			if err == nil {
@@ -101,13 +90,8 @@ LoopMain:
 					s.Flush()
 				}
 			}
-
-		case <-shutdown:
-			break LoopMain
 		}
 	}
-
-	// todo: shut down ingestion pipeline in order
 
 	logrus.Info("Flushing buffers")
 

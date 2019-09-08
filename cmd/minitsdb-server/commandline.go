@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/jessevdk/go-flags"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"os"
 )
 
@@ -28,7 +28,7 @@ func readCommandLineOptions() CommandLineOptions {
 	}
 
 	if err != nil {
-		log.WithError(err).Fatal("could not parse command line arguments")
+		logrus.WithError(err).Fatal("could not parse command line arguments")
 	}
 
 	return opts

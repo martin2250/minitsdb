@@ -7,11 +7,11 @@ import (
 )
 
 func logAddBackends(conf Configuration) {
-	if conf.Telegram != nil {
+	if conf.Logging.Telegram != nil {
 		hook, err := telegram_hook.NewTelegramHook(
-			conf.Telegram.AppName,
-			conf.Telegram.AuthToken,
-			conf.Telegram.ChatID,
+			conf.Logging.Telegram.AppName,
+			conf.Logging.Telegram.AuthToken,
+			conf.Logging.Telegram.ChatID,
 			telegram_hook.WithAsync(true),
 			telegram_hook.WithTimeout(30*time.Second),
 		)

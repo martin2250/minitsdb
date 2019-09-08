@@ -1,69 +1,86 @@
 package main
 
 import (
-	log "github.com/sirupsen/logrus"
+	"github.com/martin2250/minitsdb/cmd/minitsdb-server/api"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
+	"math"
 	"os"
+	"path"
 	"time"
 )
+
+type confIngest struct {
+	Servers []string
+	Buffer  int
+}
 
 type Configuration struct {
 	DatabasePath string
 
-	ApiListenAddress string
-	ApiPath          string
-	ApiTimeout       time.Duration
+	API api.Config
 
-	TcpListenAddress string
-	UdpListenAddress string
-
-	IngestAddress string
-
-	IngestBufferCapacity int
+	Ingest confIngest
 
 	ShutdownTimeout time.Duration
 
-	Telegram *struct {
-		AppName   string
-		AuthToken string
-		ChatID    string
+	Logging struct {
+		Telegram *struct {
+			AppName   string
+			AuthToken string
+			ChatID    string
+		}
 	}
 }
+
+var (
+	ConfigDefault = Configuration{
+		API: api.Config{
+			ServeTimeout: 5 * time.Second,
+			WaitTimeout:  20 * time.Millisecond,
+			MaxPoints:    math.MaxInt64,
+		},
+		Ingest: confIngest{
+			Buffer: 1024,
+		},
+		ShutdownTimeout: 5 * time.Second,
+	}
+	ConfigNoConfig = Configuration{
+		DatabasePath: "",
+		API: api.Config{
+			Address:      ":8080",
+			ServeTimeout: 5 * time.Second,
+			WaitTimeout:  20 * time.Millisecond,
+			MaxPoints:    math.MaxInt64,
+		},
+		Ingest: confIngest{
+			Buffer: 16,
+		},
+		ShutdownTimeout: 5 * time.Second,
+	}
+)
 
 // readConfigurationFile does what the name implies
 // kills the application when there is an error
 func readConfigurationFile(confpath string) Configuration {
-	opts := Configuration{
-		DatabasePath: "",
+	conf := ConfigDefault
 
-		ApiListenAddress: ":8080",
-		ApiPath:          "/api/",
-		ApiTimeout:       10 * time.Second,
-
-		TcpListenAddress:     "",
-		UdpListenAddress:     "",
-		IngestBufferCapacity: 8192,
-
-		ShutdownTimeout: 5 * time.Second,
-	}
-
-	if confpath == "" {
-		return opts
-	}
-
-	log.WithField("path", confpath).Info("Loading configuration file")
+	logrus.WithField("path", confpath).Info("loading configuration file")
 
 	f, err := os.Open(confpath)
 	if err != nil {
-		log.WithError(err).Fatal("could not open configuration file")
+		logrus.WithError(err).Fatal("could not open configuration file")
 	}
 	defer f.Close()
 
-	dec := yaml.NewDecoder(f)
-	err = dec.Decode(&opts)
+	err = yaml.NewDecoder(f).Decode(&conf)
 	if err != nil {
-		log.WithError(err).Fatal("could not parse configuration file")
+		logrus.WithError(err).Fatal("could not parse configuration file")
 	}
 
-	return opts
+	if !path.IsAbs(conf.DatabasePath) {
+		conf.DatabasePath = path.Join(path.Dir(confpath), conf.DatabasePath)
+	}
+
+	return conf
 }
