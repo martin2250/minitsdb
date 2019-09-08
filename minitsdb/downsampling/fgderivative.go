@@ -16,12 +16,18 @@ func (derivativeFunction) Needs(indices []bool) {
 func (d derivativeFunction) AggregatePrimary(values []int64, times []int64) int64 {
 	diff := Difference.AggregatePrimary(values, nil)
 	time := Difference.AggregatePrimary(times, nil)
+	if time < 1 {
+		time = 1
+	}
 	return (d.seconds * diff) / time
 }
 
 func (d derivativeFunction) AggregateSecondary(values [][]int64, times []int64, counts []int64) int64 {
 	diff := Difference.AggregateSecondary(values, nil, nil)
 	time := Difference.AggregatePrimary(times, nil)
+	if time < 1 {
+		time = 1
+	}
 	return (d.seconds * diff) / time
 }
 
