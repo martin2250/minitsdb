@@ -31,8 +31,7 @@ func queriesFromDescription(db *minitsdb.Database, desc queryDescription) ([]*Su
 					}
 
 					if colspec.Function == "" {
-						//qc.Function = column.DefaultFunction
-						qc.Function = downsampling.Mean
+						qc.Function = column.DefaultFunction
 					} else {
 						var err error
 						qc.Function, err = downsampling.FindFunction(colspec.Function)
