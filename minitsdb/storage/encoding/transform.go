@@ -68,7 +68,7 @@ func (t DiffTransformer) Revert(input []uint64) ([]int64, error) {
 
 func FindTransformer(s string) (Transformer, error) {
 	var arg int
-	if _, err := fmt.Sscanf(s, "D%d", &arg); err != nil {
+	if _, err := fmt.Sscanf(s, "D%d", &arg); err == nil {
 		if arg < 0 || arg > 3 {
 			return nil, fmt.Errorf("%d is outside the allowed range for a diff transformer", arg)
 		}
