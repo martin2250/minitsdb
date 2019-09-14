@@ -1,6 +1,12 @@
 # miniTSDB
 miniTSDB is a lightweight time series database.
 
+[![Scc Count Badge](https://sloc.xyz/github/martin2250/minitsdb/?category=code)](https://github.com/martin2250/minitsdb/)
+[![Scc Count Badge](https://sloc.xyz/github/martin2250/minitsdb/?category=blanks)](https://github.com/martin2250/minitsdb/)
+[![Scc Count Badge](https://sloc.xyz/github/martin2250/minitsdb/?category=lines)](https://github.com/martin2250/minitsdb/)
+[![Scc Count Badge](https://sloc.xyz/github/martin2250/minitsdb/?category=comments)](https://github.com/martin2250/minitsdb/)
+[![Scc Count Badge](https://sloc.xyz/github/martin2250/minitsdb/?category=cocomo)](https://github.com/martin2250/minitsdb/)
+
 ## Goals
 - minimal disk wear
 - automatic downsampling
