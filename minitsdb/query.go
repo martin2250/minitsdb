@@ -134,7 +134,7 @@ func (q *Query) Next() (storage.PointBuffer, error) {
 		}
 	}
 
-	output := DownsampleQuery(q.buffer, q.columns, q.timeStep, false, &q.bufferIndexStart, q.Bucket.First)
+	output := DownsampleQuery(q.buffer, q.columns, q.timeStep, q.atEnd, &q.bufferIndexStart, q.Bucket.First)
 
 	if output.Len() > 0 {
 		q.timeRange.Start = output.Values[0][output.Len()-1] + q.timeStep
@@ -170,27 +170,20 @@ func (b *Bucket) Query(columns []QueryColumn, timeRange TimeRange, timeStep int6
 
 	// determine which columns need to be decoded
 	var decoderNeed = make([]bool, b.Buffer.Cols())
-	var transformers = make([]encoding.Transformer, b.Buffer.Cols())
-
 	decoderNeed[0] = true // need time
-	transformers[0] = encoding.TimeTransformer
 
 	if b.First {
 		for _, queryCol := range columns {
 			decoderNeed[queryCol.Column.IndexPrimary] = true
-			transformers[queryCol.Column.IndexPrimary] = queryCol.Column.Transformer
 		}
 	} else {
 		decoderNeed[1] = true
-		transformers[1] = encoding.CountTransformer
-
 		for _, queryCol := range columns {
 			need := make([]bool, downsampling.AggregatorCount)
 			queryCol.Function.Needs(need)
 			for i, indexSecondary := range queryCol.Column.IndexSecondary {
 				if need[i] {
 					decoderNeed[indexSecondary] = true
-					transformers[indexSecondary] = queryCol.Column.Transformer
 				}
 			}
 		}
@@ -221,7 +214,7 @@ func (b *Bucket) Query(columns []QueryColumn, timeRange TimeRange, timeStep int6
 
 		columns:      columns,
 		needIndex:    needIndex,
-		transformers: transformers,
+		transformers: b.Transformers,
 
 		Bucket: b,
 	}

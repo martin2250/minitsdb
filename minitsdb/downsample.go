@@ -66,6 +66,7 @@ func DownsampleQuery(src storage.PointBuffer, queryColumns []QueryColumn, timeSt
 
 	for *indexStart < length {
 		indexEnd := -1
+		// todo: calculate currentRange.End with input time step in mind
 		currentRange := TimeRangeFromPoint(src.Values[0][*indexStart], timeStep)
 
 		for i := *indexStart; i < length; i++ {
@@ -80,8 +81,11 @@ func DownsampleQuery(src storage.PointBuffer, queryColumns []QueryColumn, timeSt
 		}
 
 		// not enough values to fill this time step
-		if indexEnd == -1 && !force {
-			break
+		if indexEnd == -1 {
+			if !force {
+				break
+			}
+			indexEnd = length
 		}
 
 		output.Values[0] = append(output.Values[0], currentRange.Start)
