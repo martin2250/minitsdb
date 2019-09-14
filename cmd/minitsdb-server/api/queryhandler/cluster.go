@@ -58,7 +58,7 @@ func (c *QueryCluster) Execute() error {
 		}
 
 		d := time.Now().Sub(c.TimeStart)
-		logrus.WithFields(logrus.Fields{"duration": d}).Info("query cluster complete")
+		logrus.WithFields(logrus.Fields{"duration": d}).Trace("query cluster complete")
 	}()
 
 	c.TimeStart = time.Now()

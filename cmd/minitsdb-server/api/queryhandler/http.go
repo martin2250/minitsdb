@@ -15,7 +15,7 @@ func logHTTPError(w http.ResponseWriter, r *http.Request, error string, code int
 		"error":  error,
 		"client": r.RemoteAddr,
 		"url":    r.URL,
-	}).Warning("API request failed")
+	}).Trace("API request failed")
 	http.Error(w, error, code)
 }
 
@@ -71,7 +71,7 @@ func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			End:   desc.TimeEnd,
 		},
 		"step": desc.TimeStep,
-	}).Info("Received API request")
+	}).Trace("Received API request")
 
 	// send information about the series which were found
 	info := make([]struct {
@@ -89,7 +89,7 @@ func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	err = json.NewEncoder(querySinkTemplate.Writer).Encode(info)
 
 	if err != nil {
-		logrus.WithError(err).Warning("sending query info resulted in an error")
+		logrus.WithError(err).Trace("sending query info resulted in an error")
 	}
 
 	// attach all subqueries to QueryClusters
@@ -138,13 +138,13 @@ func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					"range":     cluster.Parameters.Range,
 					"step":      cluster.Parameters.TimeStep,
 					"receivers": len(cluster.SubQueries),
-				}).Info("Executing QueryCluster")
+				}).Trace("Executing QueryCluster")
 
 				err := cluster.Execute()
 				if err != nil {
-					logrus.WithError(err).Warning("QueryCluster returned error")
+					logrus.WithError(err).Trace("QueryCluster returned error")
 				}
-				logrus.Info("Finished QueryCluster")
+				logrus.Trace("Finished QueryCluster")
 			})
 		}
 	}
@@ -167,5 +167,5 @@ func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case <-finished:
 	}
 
-	logrus.Info("Completed API request")
+	logrus.Trace("Completed API request")
 }
