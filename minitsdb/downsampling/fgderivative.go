@@ -2,20 +2,23 @@ package downsampling
 
 import (
 	"errors"
+	"math"
 	"strconv"
 )
 
 type derivativeFunction struct {
 	seconds int64
+	dVal    differenceFunction
+	dTime   differenceFunction
 }
 
-func (derivativeFunction) Needs(indices []bool) {
-	Difference.Needs(indices)
+func (d *derivativeFunction) Needs(indices []bool) {
+	d.dVal.Needs(indices)
 }
 
-func (d derivativeFunction) AggregatePrimary(values []int64, times []int64) int64 {
-	diff := Difference.AggregatePrimary(values, nil)
-	time := Difference.AggregatePrimary(times, nil)
+func (d *derivativeFunction) AggregatePrimary(values []int64, times []int64) int64 {
+	diff := d.dVal.AggregatePrimary(values, nil)
+	time := d.dTime.AggregatePrimary(times, nil)
 	if time < 1 {
 		time = 1
 	}
@@ -23,8 +26,8 @@ func (d derivativeFunction) AggregatePrimary(values []int64, times []int64) int6
 }
 
 func (d derivativeFunction) AggregateSecondary(values [][]int64, times []int64, counts []int64) int64 {
-	diff := Difference.AggregateSecondary(values, nil, nil)
-	time := Difference.AggregatePrimary(times, nil)
+	diff := d.dVal.AggregateSecondary(values, nil, nil)
+	time := d.dTime.AggregatePrimary(times, nil)
 	if time < 1 {
 		time = 1
 	}
@@ -51,7 +54,9 @@ func (derivativeFunctionGenerator) Create(args map[string]string) (Function, err
 		return nil, errors.New("argument 'seconds' must be greater than zero")
 	}
 
-	return derivativeFunction{
+	return &derivativeFunction{
 		seconds: i,
+		dVal:    differenceFunction{last: math.MinInt64},
+		dTime:   differenceFunction{last: math.MinInt64},
 	}, nil
 }

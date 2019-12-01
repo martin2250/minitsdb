@@ -2,6 +2,7 @@ package downsampling
 
 import (
 	"errors"
+	"math"
 	"strconv"
 )
 
@@ -9,6 +10,7 @@ type integrateFunction struct {
 	accumulator int64
 	aggregator  Aggregator
 	seconds     int64
+	dTime       differenceFunction
 }
 
 func (af integrateFunction) Needs(indices []bool) {
@@ -17,14 +19,14 @@ func (af integrateFunction) Needs(indices []bool) {
 
 func (af *integrateFunction) AggregatePrimary(values []int64, times []int64) int64 {
 	d := af.aggregator.AggregatePrimary(values, times)
-	d *= Difference.AggregatePrimary(times, nil)
+	d *= af.dTime.AggregatePrimary(times, nil)
 	af.accumulator += d
 	return af.accumulator / af.seconds
 }
 
 func (af *integrateFunction) AggregateSecondary(values [][]int64, times []int64, counts []int64) int64 {
 	d := af.aggregator.AggregateSecondary(values, times, counts)
-	d *= Difference.AggregatePrimary(times, nil)
+	d *= af.dTime.AggregatePrimary(times, nil)
 	af.accumulator += d
 	return af.accumulator / af.seconds
 }
@@ -62,5 +64,6 @@ func (integrateFunctionGenerator) Create(args map[string]string) (Function, erro
 	return &integrateFunction{
 		aggregator: a,
 		seconds:    i,
+		dTime:      differenceFunction{last: math.MinInt64},
 	}, nil
 }

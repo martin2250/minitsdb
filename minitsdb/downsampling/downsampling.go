@@ -70,16 +70,13 @@ var AggregatorCount = len(Aggregators)
 
 // functions
 var (
-	Count      countFunction
-	Difference differenceFunction
-	PeakPeak   peakpeakFunction
+	Count    countFunction
+	PeakPeak peakpeakFunction
 )
 
 var Functions = map[string]Function{
-	"count":      Count,
-	"difference": Difference,
-	"diff":       Difference,
-	"peakpeak":   PeakPeak,
+	"count":    Count,
+	"peakpeak": PeakPeak,
 }
 
 var FunctionCount int
@@ -94,6 +91,7 @@ func init() {
 
 // function generators
 var (
+	Difference differenceFunctionGenerator
 	Derivative derivativeFunctionGenerator
 	Accumulate accumulateFunctionGenerator
 	Integrate  integrateFunctionGenerator
@@ -101,6 +99,8 @@ var (
 )
 
 var FunctionGenerators = map[string]FunctionGenerator{
+	"diff":       Difference,
+	"difference": Difference,
 	"derivative": Derivative,
 	"accumulate": Accumulate,
 	"integrate":  Integrate,

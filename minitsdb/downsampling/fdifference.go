@@ -1,21 +1,41 @@
 package downsampling
 
+import "math"
+
 type differenceFunction struct {
+	last int64
 }
 
 func (differenceFunction) Needs(indices []bool) {
 	Last.Needs(indices)
-	First.Needs(indices)
+	First.Needs(indices) // for compatibility reasons
 }
 
-func (differenceFunction) AggregatePrimary(values []int64, times []int64) int64 {
-	last := Last.AggregatePrimary(values, nil)
-	first := First.AggregatePrimary(values, nil)
-	return last - first
+func (d *differenceFunction) AggregatePrimary(values []int64, times []int64) int64 {
+	val := Last.AggregatePrimary(values, nil)
+	last := d.last
+	d.last = val
+	if last == math.MinInt64 {
+		last = First.AggregatePrimary(values, nil)
+	}
+	return val - last
 }
 
-func (differenceFunction) AggregateSecondary(values [][]int64, times []int64, counts []int64) int64 {
-	last := Last.AggregateSecondary(values, nil, nil)
-	first := First.AggregateSecondary(values, nil, nil)
-	return last - first
+func (d *differenceFunction) AggregateSecondary(values [][]int64, times []int64, counts []int64) int64 {
+	val := Last.AggregateSecondary(values, nil, nil)
+	last := d.last
+	d.last = val
+	if last == math.MinInt64 {
+		last = First.AggregateSecondary(values, nil, nil)
+	}
+	return val - last
+}
+
+type differenceFunctionGenerator struct {
+}
+
+func (differenceFunctionGenerator) Create(args map[string]string) (Function, error) {
+	return &differenceFunction{
+		last: math.MinInt64,
+	}, nil
 }
