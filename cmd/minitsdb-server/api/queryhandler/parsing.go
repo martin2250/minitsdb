@@ -13,6 +13,7 @@ type queryDescription struct {
 	Columns []struct {
 		Tags     map[string]string
 		Function string
+		Factor   *float64
 	}
 	TimeStep  string
 	timeStep  time.Duration // todo: replace this with a prettier solution

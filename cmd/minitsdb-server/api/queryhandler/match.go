@@ -20,6 +20,7 @@ func queriesFromDescription(db *minitsdb.Database, desc queryDescription) ([]*Su
 				query.Columns = append(query.Columns, minitsdb.QueryColumn{
 					Column:   &series.Columns[i],
 					Function: series.Columns[i].DefaultFunction,
+					Factor:   1.0,
 				})
 			}
 		} else {
@@ -28,6 +29,11 @@ func queriesFromDescription(db *minitsdb.Database, desc queryDescription) ([]*Su
 				for _, column := range series.FindColumns(colspec.Tags, true) {
 					qc := minitsdb.QueryColumn{
 						Column: column,
+						Factor: 1.0,
+					}
+
+					if colspec.Factor != nil {
+						qc.Factor = *colspec.Factor
 					}
 
 					if colspec.Function == "" {

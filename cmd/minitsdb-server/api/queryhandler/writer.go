@@ -84,6 +84,7 @@ func (w *httpQueryResultWriter) WriteBinary(buffer storage.PointBuffer) error {
 
 	for i, vals := range buffer.Values[1:] {
 		fac := math.Pow10(-w.Columns[i].Column.Decimals)
+		fac *= w.Columns[i].Factor
 		valuesf := make([]float64, len(vals))
 		for j := range valuesf {
 			valuesf[j] = float64(vals[j]) * fac

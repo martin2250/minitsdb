@@ -14,6 +14,7 @@ import (
 type QueryColumn struct {
 	Column   *Column
 	Function downsampling.Function
+	Factor   float64
 }
 
 // Query reads and aggregates points from a bucket of a series (both from disk and RAM)
