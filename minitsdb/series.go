@@ -349,13 +349,14 @@ func (s *Series) CheckFlush() bool {
 	}
 
 	// flush if buffer size exceeds force flush count
+	// (should be taken care of by inserting logic)
 	if s.Buckets[0].Buffer.Len() >= s.ForceFlushCount {
 		return true
 	}
 
 	// don't do next check if the flush interval has not elapsed since the last flush
-	if time.Now().Sub(s.LastFlush) < s.FlushInterval {
-		return false
+	if time.Now().Sub(s.LastFlush) > s.FlushInterval {
+		return true
 	}
 
 	// check if buffer size exceeds flush count

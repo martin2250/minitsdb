@@ -86,7 +86,7 @@ LoopMain:
 				logrus.WithError(err).WithField("point", point).Warning("Insert Failed")
 				continue
 			} else {
-				if s.CheckFlush() {
+				if s.Buckets[0].Buffer.Len() >= s.ForceFlushCount {
 					s.Flush()
 				}
 			}
